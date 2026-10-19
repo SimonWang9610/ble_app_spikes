@@ -30,8 +30,8 @@ async def serve(fixture, handler, port):
         fixture.listeners.add(queue)
         try:
             await _send(response, {"type": "state", "state": fixture.snapshot()})
-            for line in list(handler.recent):
-                await _send(response, {"type": "log", "line": line})
+            for event in list(handler.recent):
+                await _send(response, event)
             while True:
                 await _send(response, await queue.get())
         except (ConnectionResetError, asyncio.CancelledError):
@@ -49,6 +49,8 @@ async def serve(fixture, handler, port):
                     await fixture.set_advertising(bool(body["on"]))
                 case "bluetooth":
                     await fixture.set_bluetooth(bool(body["on"]))
+                case "mock":
+                    await fixture.set_mock(bool(body["on"]), body.get("interval"), body.get("off"))
                 case "stored":
                     fixture.set_stored(body["char"], _value(body))
                 case "stream":
@@ -60,7 +62,7 @@ async def serve(fixture, handler, port):
                 case _:
                     raise web.HTTPNotFound()
         except (KeyError, ValueError) as error:
-            log.warning("page: %s rejected: %s", name, error)
+            log.warning("page: %s rejected: %s", name, error, extra={"kind": "warn"})
             return web.json_response({"error": str(error)}, status=400)
         return web.json_response(fixture.snapshot())
 
@@ -69,7 +71,7 @@ async def serve(fixture, handler, port):
     runner = web.AppRunner(app, access_log=None)
     await runner.setup()
     await web.TCPSite(runner, "127.0.0.1", port).start()
-    log.info("control page http://127.0.0.1:%d", port)
+    log.info("control page http://127.0.0.1:%d", port, extra={"kind": "info"})
     await asyncio.Event().wait()
 
 

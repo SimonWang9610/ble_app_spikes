@@ -16,7 +16,7 @@ class CharacteristicRef {
 class BleService {
   Future<void>? _binding;
   BleManager? _manager;
-  // Handles share the core's state; keeping one per device keeps the core from forgetting it.
+  // Handles share the core's state; keeping one per device until `forget` keeps the core from forgetting it.
   final _devices = <String, BluetoothDevice>{};
 
   BleManager get _requireManager => _manager ?? (throw StateError('initialize first'));
@@ -66,6 +66,9 @@ class BleService {
   int mtu(String remoteId) => _device(remoteId).mtuNow();
 
   Future<int> readRssi(String remoteId) => _device(remoteId).readRssi();
+
+  /// Drops and disposes the cached handle, so the next session starts from a fresh one.
+  void forget(String remoteId) => _devices.remove(remoteId)?.dispose();
 
   // Characteristic
 

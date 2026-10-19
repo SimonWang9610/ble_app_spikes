@@ -38,7 +38,8 @@ its services and characteristics the way a phone sees them, with live state and 
 
 - device: Bluetooth, advertising, subscribed phones; turn Bluetooth off / on (drops every phone's
   link, needs `brew install blueutil`), start / stop advertising
-- VALUE, INFO: set the value phones get on their next read (nothing is sent)
+- mock link drops: Bluetooth off for a few seconds on a repeating interval (also `blueutil`)
+- VALUE: set the value phones get on their next read (nothing is sent)
 - NOTIFY, INDICATE: each has its own counter, interval, pause; send the next counter or custom bytes
   now, to the phones subscribed to that characteristic
 

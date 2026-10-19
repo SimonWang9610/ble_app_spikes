@@ -47,18 +47,15 @@ final class CharacteristicState: Identifiable {
     // Write form, bound to the dialog's controls.
     var input = ""
     var inputFormat = ValueFormat.hex
-    var withoutResponse: Bool
 
     init(ref: CharacteristicRef, properties: CharacteristicProperties) {
         self.ref = ref
         self.properties = properties
-        withoutResponse = !properties.write && properties.writeWithoutResponse
     }
 
     nonisolated var id: CharacteristicRef { ref }
     var name: String { Fixture.shortName(ref.characteristic) }
     var canSubscribe: Bool { properties.notify || properties.indicate }
-    var canWrite: Bool { properties.write || properties.writeWithoutResponse }
 
     /// "2a 00 00 00 = 42" for notify / indicate counters, "68 69 "hi"" for text, hex otherwise.
     func show(_ value: Data) -> String {
@@ -89,6 +86,9 @@ final class DeviceSession {
     @ObservationIgnored private var reconnecting: Task<Void, Never>?
     @ObservationIgnored private var valueStreams: [CharacteristicRef: Task<Void, Never>] = [:]
     @ObservationIgnored private var states: [CharacteristicRef: CharacteristicState] = [:]
+    // Bumped by Disconnect; work started under an older run stops at its next await.
+    @ObservationIgnored private var run = 0
+    @ObservationIgnored private var connectedAt: ContinuousClock.Instant?
 
     init(remoteId: String, name: String, service: BleService, log: DeviceLog) {
         self.remoteId = remoteId
@@ -102,39 +102,46 @@ final class DeviceSession {
     // MARK: Connection
 
     func connect() async {
+        let token = run
         status = .connecting
         log.event("Connecting to \(name)")
         do {
-            try await establish()
-            status = .connected
+            try await establish(token)
+            markConnected()
             log.event("Connected")
         } catch {
+            guard isCurrent(token) else { return }
             status = .disconnected(reason: describe(error))
             log.error("Connect failed: \(describe(error))")
         }
     }
 
     func disconnect() async {
+        run += 1
         reconnecting?.cancel()
+        reconnecting = nil
+        // Unsubscribing only works over a live link; while reconnecting it would just time out.
+        let live = status == .connected
         status = .disconnecting
+        for state in states.values where live && state.subscribed {
+            do {
+                _ = try await log.api("setNotifyValue(false) \(state.name)") { try await service.setNotify(state.ref, false) }
+            } catch {
+                log.error("\(state.name): unsubscribe failed: \(describe(error))")
+            }
+        }
         clearSubscriptions()
         do {
             try await log.api("disconnect()") { try await service.disconnect(remoteId) }
         } catch {
             log.error("Disconnect failed: \(describe(error))")
         }
-        endWatching()
-        status = .disconnected(reason: nil)
-        log.event("Disconnected")
-    }
-
-    /// Ends the session's tasks; the store calls it when the session is replaced.
-    func endWatching() {
         watcher?.cancel()
         watcher = nil
-        reconnecting?.cancel()
-        for task in valueStreams.values { task.cancel() }
-        valueStreams.removeAll()
+        await service.forget(remoteId)
+        connectedAt = nil
+        status = .disconnected(reason: nil)
+        log.event("Disconnected")
     }
 
     func refreshRssi() async {
@@ -145,17 +152,43 @@ final class DeviceSession {
         }
     }
 
-    /// Connect, discover, then re-apply the user's subscriptions.
-    private func establish() async throws {
+    private func isCurrent(_ token: Int) -> Bool {
+        token == run && !Task.isCancelled
+    }
+
+    private func check(_ token: Int) throws {
+        guard isCurrent(token) else { throw CancellationError() }
+    }
+
+    private func markConnected() {
+        status = .connected
+        connectedAt = .now
+    }
+
+    /// Connect, discover, then re-apply the user's subscriptions. Fails unless every one is back.
+    private func establish(_ token: Int) async throws {
         try await log.api("connect(timeout: 10)") { try await service.connect(remoteId, timeout: 10) }
-        startWatching()
+        try check(token)
+        startWatching(token)
         let found = try await log.api("discoverServices()") { try await service.discoverServices(remoteId) }
+        try check(token)
+        let subscribed = states.values.filter(\.subscribed)
+        let foundRefs = Set(found.flatMap { service in
+            service.characteristics.map {
+                CharacteristicRef(remoteId: remoteId, service: service.serviceUuid, characteristic: $0.characteristicUuid)
+            }
+        })
+        let missing = subscribed.filter { !foundRefs.contains($0.ref) }.map(\.name).sorted()
+        if !missing.isEmpty {
+            throw SessionError(message: "not found after discovery: \(missing.joined(separator: ", "))")
+        }
         apply(found)
         mtu = try? await service.mtu(remoteId)
+        try check(token)
         let count = found.reduce(0) { $0 + $1.characteristics.count }
         log.event("Found \(found.count) services, \(count) characteristics")
-        for state in states.values where state.subscribed {
-            try await enableValues(state)
+        for state in subscribed {
+            try await enableValues(state, token)
         }
     }
 
@@ -175,54 +208,66 @@ final class DeviceSession {
 
     // MARK: Link loss
 
-    private func startWatching() {
-        guard watcher == nil else { return }
+    /// One watcher per link: replaces the previous link's watcher.
+    private func startWatching(_ token: Int) {
+        watcher?.cancel()
         watcher = Task { [weak self] in
             guard let self else { return }
             do {
+                let updates = try await service.connectionStates(remoteId)
+                guard isCurrent(token) else { return }
                 // Emits the current state first; only a drop from `connected` counts as link loss.
-                for await state in try await service.connectionStates(remoteId) where state == .disconnected {
-                    if status == .connected { linkLost() }
+                for await state in updates where state == .disconnected {
+                    if isCurrent(token), status == .connected { linkLost() }
                 }
             } catch {
+                guard isCurrent(token) else { return }
                 log.error("Connection state unavailable: \(describe(error))")
             }
         }
     }
 
     private func linkLost() {
-        log.event("Link lost")
-        for state in states.values where state.subscribed {
-            valueStreams.removeValue(forKey: state.ref)?.cancel()
-        }
+        let up = connectedAt.map { (ContinuousClock.now - $0).seconds } ?? 0
+        connectedAt = nil
+        log.event("Link lost after \(up.oneDecimal) s")
+        stopAllValues()
         guard autoReconnect else {
             clearSubscriptions()
             status = .disconnected(reason: "link lost")
             return
         }
-        reconnecting = Task { await reconnect() }
+        let token = run
+        reconnecting = Task { await reconnect(token) }
     }
 
-    private func reconnect() async {
+    private func reconnect(_ token: Int) async {
         let start = ContinuousClock.now
         var attempt = 0
-        while !Task.isCancelled {
+        while isCurrent(token) {
             attempt += 1
             status = .reconnecting(attempt: attempt)
             log.event("Reconnecting, attempt \(attempt)")
             do {
-                try await establish()
+                try await establish(token)
                 let seconds = (ContinuousClock.now - start).seconds
                 let resumed = states.values.filter(\.subscribed).map(\.name).sorted()
-                status = .connected
-                log.event("Reconnected after \(seconds.formatted(.number.precision(.fractionLength(1)))) s"
+                markConnected()
+                log.event("Reconnected after \(seconds.oneDecimal) s"
                           + (resumed.isEmpty ? "" : ", resumed \(resumed.joined(separator: ", "))"))
                 return
-            } catch is CancellationError {
-                return
             } catch {
+                guard isCurrent(token) else { return }
                 log.error("Reconnect attempt \(attempt) failed: \(describe(error))")
             }
+            // Close the half-open link so nothing of this attempt survives into the next one.
+            stopAllValues()
+            do {
+                try await log.api("disconnect()") { try await service.disconnect(remoteId) }
+            } catch {
+                log.error("Cleanup disconnect failed: \(describe(error))")
+            }
+            guard isCurrent(token) else { return }
             let delay = Self.reconnectDelays[min(attempt - 1, Self.reconnectDelays.count - 1)]
             let elapsed = (ContinuousClock.now - start).seconds
             if elapsed + delay > Self.reconnectLimit {
@@ -236,10 +281,13 @@ final class DeviceSession {
     }
 
     private func clearSubscriptions() {
-        for state in states.values where state.subscribed {
-            state.subscribed = false
-            valueStreams.removeValue(forKey: state.ref)?.cancel()
-        }
+        stopAllValues()
+        for state in states.values { state.subscribed = false }
+    }
+
+    private func stopAllValues() {
+        for task in valueStreams.values { task.cancel() }
+        valueStreams.removeAll()
     }
 
     // MARK: Characteristic actions
@@ -252,10 +300,9 @@ final class DeviceSession {
         }
     }
 
-    func write(_ state: CharacteristicState) async {
+    func write(_ state: CharacteristicState, withoutResponse: Bool) async {
         await perform(state, busy: "Writing…") {
             let value = try Data(state.input, format: state.inputFormat)
-            let withoutResponse = state.withoutResponse
             try await log.api("write \(state.name) withoutResponse: \(withoutResponse)") {
                 try await service.write(state.ref, value, withoutResponse: withoutResponse)
             }
@@ -267,7 +314,7 @@ final class DeviceSession {
     func setSubscribed(_ state: CharacteristicState, _ on: Bool) async {
         await perform(state, busy: on ? "Subscribing…" : "Unsubscribing…") {
             if on {
-                try await enableValues(state)
+                try await enableValues(state, run)
                 state.subscribed = true
                 log.event("\(state.name) subscribed")
             } else {
@@ -280,9 +327,10 @@ final class DeviceSession {
     }
 
     /// Listens first, then enables notify / indicate, so no value is missed.
-    private func enableValues(_ state: CharacteristicState) async throws {
+    private func enableValues(_ state: CharacteristicState, _ token: Int) async throws {
         valueStreams.removeValue(forKey: state.ref)?.cancel()
         let values = try await service.values(state.ref)
+        try check(token)
         valueStreams[state.ref] = Task { [weak self] in
             for await value in values {
                 state.update(value, .received)
@@ -292,6 +340,7 @@ final class DeviceSession {
         }
         do {
             _ = try await log.api("setNotifyValue(true) \(state.name)") { try await service.setNotify(state.ref, true) }
+            try check(token)
         } catch {
             stopValues(state)
             throw error
@@ -307,6 +356,8 @@ final class DeviceSession {
         state.error = nil
         do {
             try await body()
+        } catch is CancellationError {
+            // Disconnect began; nothing to report.
         } catch {
             state.error = describe(error)
             log.error("\(state.name): \(describe(error))")
@@ -325,4 +376,14 @@ private extension CharacteristicState {
 
 private extension Duration {
     var seconds: Double { Double(components.seconds) + Double(components.attoseconds) / 1e18 }
+}
+
+private extension Double {
+    /// "7.3"
+    var oneDecimal: String { formatted(.number.precision(.fractionLength(1))) }
+}
+
+private struct SessionError: LocalizedError {
+    let message: String
+    var errorDescription: String? { message }
 }

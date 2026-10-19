@@ -1,8 +1,9 @@
 import SwiftUI
 
-/// The dialog for one characteristic: only the actions its properties allow.
+/// The dialog for one operation of a characteristic.
 struct CharacteristicSheet: View {
     @Bindable var state: CharacteristicState
+    let operation: GattOperation
     let session: DeviceSession
     @Environment(\.dismiss) private var dismiss
 
@@ -12,54 +13,13 @@ struct CharacteristicSheet: View {
                 Section {
                     Text(state.ref.characteristic).font(.caption.monospaced()).foregroundStyle(.secondary)
                     LabeledContent("Service", value: Fixture.label(state.ref.service))
-                    LabeledContent("Properties", value: state.properties.summary)
                 }
 
-                Section("Latest") {
-                    if let value = state.latest, let time = state.latestTime, let source = state.latestSource {
-                        Text(state.show(value)).font(.body.monospaced()).textSelection(.enabled)
-                        Text("\(source.rawValue) at \(time.formatted(date: .omitted, time: .standard))"
-                             + (state.receivedCount > 0 ? ", \(state.receivedCount) received" : ""))
-                            .font(.caption).foregroundStyle(.secondary)
-                    } else {
-                        Text("No value yet").foregroundStyle(.secondary)
-                    }
-                }
-
-                if state.properties.read {
-                    Section {
-                        Button("Read") { Task { await session.read(state) } }
-                    }
-                }
-
-                if state.canWrite {
-                    Section("Write") {
-                        Picker("Format", selection: $state.inputFormat) {
-                            ForEach(ValueFormat.allCases) { Text($0 == .hex ? "hex" : "text").tag($0) }
-                        }
-                        .pickerStyle(.segmented)
-                        TextField(state.inputFormat == .hex ? "01 02 0a" : "text", text: $state.input)
-                            .font(.body.monospaced())
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                        if state.properties.write && state.properties.writeWithoutResponse {
-                            Toggle("Without response", isOn: $state.withoutResponse)
-                        }
-                        Button("Write") { Task { await session.write(state) } }
-                            .disabled(state.input.isEmpty)
-                    }
-                }
-
-                if state.canSubscribe {
-                    Section {
-                        if state.subscribed {
-                            Button("Unsubscribe", role: .destructive) { Task { await session.setSubscribed(state, false) } }
-                        } else {
-                            Button("Subscribe") { Task { await session.setSubscribed(state, true) } }
-                        }
-                    } footer: {
-                        Text("Stays on when you leave the device; ends on Unsubscribe or Disconnect.")
-                    }
+                switch operation {
+                case .read: readSection
+                case .write: writeSection(withoutResponse: false)
+                case .writeWithoutResponse: writeSection(withoutResponse: true)
+                case .notify, .indicate: subscribeSection
                 }
 
                 if let busy = state.busy {
@@ -70,9 +30,69 @@ struct CharacteristicSheet: View {
                 }
             }
             .disabled(!session.isConnected)
-            .navigationTitle(state.name)
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { Button("Done") { dismiss() } }
+            .toolbar {
+                ToolbarItem(placement: .principal) {
+                    HStack(spacing: 6) {
+                        if let name = Fixture.knownName(state.ref.characteristic) {
+                            Text(name).font(.headline)
+                        }
+                        OperationChip(operation: operation)
+                    }
+                }
+                ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
+            }
+        }
+    }
+
+    private var readSection: some View {
+        Section("Latest") {
+            if let value = state.latest, let time = state.latestTime, let source = state.latestSource {
+                Text(state.show(value)).font(.body.monospaced()).textSelection(.enabled)
+                Text("\(source.rawValue) at \(time.formatted(date: .omitted, time: .standard))")
+                    .font(.caption).foregroundStyle(.secondary)
+            } else {
+                Text("No value yet").foregroundStyle(.secondary)
+            }
+            Button("Read") { Task { await session.read(state) } }
+        }
+    }
+
+    private func writeSection(withoutResponse: Bool) -> some View {
+        Section("Value") {
+            Picker("Format", selection: $state.inputFormat) {
+                ForEach(ValueFormat.allCases) { Text($0 == .hex ? "hex" : "text").tag($0) }
+            }
+            .pickerStyle(.segmented)
+            TextField(state.inputFormat == .hex ? "01 02 0a" : "text", text: $state.input)
+                .font(.body.monospaced())
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+            Button("Write") { Task { await session.write(state, withoutResponse: withoutResponse) } }
+                .disabled(state.input.isEmpty)
+        }
+    }
+
+    private var subscribeSection: some View {
+        Section {
+            LabeledContent("Subscribed", value: state.subscribed ? "on" : "off")
+            LabeledContent("Received", value: "\(state.receivedCount)")
+            if let value = state.latest, state.latestSource == .received, let time = state.latestTime {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(state.show(value)).font(.body.monospaced()).textSelection(.enabled)
+                    Text("received at \(time.formatted(date: .omitted, time: .standard))")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            } else {
+                Text("Nothing received yet").foregroundStyle(.secondary)
+            }
+            if state.subscribed {
+                Button("Unsubscribe", role: .destructive) { Task { await session.setSubscribed(state, false) } }
+            } else {
+                Button("Subscribe") { Task { await session.setSubscribed(state, true) } }
+            }
+        } footer: {
+            Text("Stays on when you leave the device; ends on Unsubscribe or Disconnect.")
         }
     }
 }

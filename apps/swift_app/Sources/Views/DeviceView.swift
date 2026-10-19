@@ -1,4 +1,3 @@
-import BlePocSwift
 import SwiftUI
 
 struct DeviceView: View {
@@ -6,8 +5,8 @@ struct DeviceView: View {
     @Bindable var session: DeviceSession
     @Environment(SessionStore.self) private var sessions
     @Environment(\.dismiss) private var dismiss
-    // Which characteristic's dialog is open: pure view state.
-    @State private var selected: CharacteristicState?
+    // Which operation's dialog is open: pure view state.
+    @State private var selected: OperationRow?
 
     var body: some View {
         List {
@@ -30,17 +29,19 @@ struct DeviceView: View {
             }
 
             ForEach(session.services) { group in
-                Section(Fixture.label(group.uuid)) {
-                    ForEach(group.characteristics) { state in
-                        Button { selected = state } label: { CharacteristicRow(state: state) }
+                Section {
+                    ForEach(group.rows) { row in
+                        Button { selected = row } label: { CharacteristicRow(row: row) }
                     }
+                } header: {
+                    ServiceHeader(uuid: group.uuid)
                 }
             }
         }
         .navigationTitle(session.name)
         .navigationBarTitleDisplayMode(.inline)
-        .sheet(item: $selected) { state in
-            CharacteristicSheet(state: state, session: session)
+        .sheet(item: $selected) { row in
+            CharacteristicSheet(state: row.state, operation: row.operation, session: session)
                 .presentationDetents([.medium, .large])
         }
     }
@@ -68,42 +69,50 @@ struct DeviceView: View {
     }
 }
 
-/// One characteristic: name, properties, latest value, live badge. Redraws on its own when it ticks.
-private struct CharacteristicRow: View {
-    let state: CharacteristicState
+private struct ServiceHeader: View {
+    let uuid: String
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline) {
+        VStack(alignment: .leading, spacing: 2) {
+            if let name = Fixture.knownName(uuid) {
+                Text(name).font(.subheadline.weight(.semibold)).foregroundStyle(.primary)
+            }
+            Text(uuid).font(.caption.monospaced()).foregroundStyle(.secondary)
+        }
+        .textCase(nil)
+    }
+}
+
+/// One operation of a characteristic: name, chip, UUID, subscribed icon. Redraws on its own when it ticks.
+private struct CharacteristicRow: View {
+    let row: OperationRow
+
+    private var state: CharacteristicState { row.state }
+
+    var body: some View {
+        HStack {
             VStack(alignment: .leading, spacing: 3) {
-                Text(state.name).font(.body.weight(.semibold)).foregroundStyle(.primary)
-                Text(state.properties.summary).font(.caption).foregroundStyle(.secondary)
-                Text(valueLine).font(.caption.monospaced()).foregroundStyle(.secondary).lineLimit(1)
+                HStack(spacing: 6) {
+                    if let name = Fixture.knownName(state.ref.characteristic) {
+                        Text(name).font(.body.weight(.semibold)).foregroundStyle(.primary)
+                    }
+                    OperationChip(operation: row.operation)
+                }
+                Text(state.ref.characteristic).font(.caption.monospaced()).foregroundStyle(.secondary)
             }
             Spacer()
-            if state.subscribed {
-                Label("\(state.receivedCount)", systemImage: "dot.radiowaves.left.and.right")
-                    .font(.caption).foregroundStyle(.green)
+            if row.operation.isSubscription {
+                if state.subscribed {
+                    Label("\(state.receivedCount)", systemImage: "dot.radiowaves.left.and.right")
+                        .font(.caption).foregroundStyle(.green)
+                } else {
+                    Image(systemName: "antenna.radiowaves.left.and.right.slash").foregroundStyle(.secondary)
+                }
             }
             if state.error != nil {
                 Image(systemName: "exclamationmark.circle").foregroundStyle(.red)
             }
+            Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
         }
-    }
-
-    private var valueLine: String {
-        guard let value = state.latest, let time = state.latestTime, let source = state.latestSource else { return "–" }
-        return "\(state.show(value)) · \(source.rawValue) \(time.formatted(date: .omitted, time: .standard))"
-    }
-}
-
-extension CharacteristicProperties {
-    var summary: String {
-        [
-            read ? "read" : nil,
-            write ? "write" : nil,
-            writeWithoutResponse ? "write without response" : nil,
-            notify ? "notify" : nil,
-            indicate ? "indicate" : nil,
-        ].compactMap(\.self).joined(separator: " · ")
     }
 }

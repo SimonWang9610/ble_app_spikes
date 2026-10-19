@@ -60,8 +60,9 @@ class SubscribeRequested extends SessionEvent {
 }
 
 class _LinkChanged extends SessionEvent {
-  const _LinkChanged(this.state);
+  const _LinkChanged(this.link, this.state);
 
+  final int link;
   final BluetoothConnectionState state;
 }
 
@@ -72,11 +73,19 @@ class _ValueReceived extends SessionEvent {
   final Uint8List value;
 }
 
+/// Thrown inside work that a newer run (Disconnect, another connect) replaced; the work stops quietly.
+class _Superseded implements Exception {
+  const _Superseded();
+}
+
 /// One connected device: connection, auto-reconnect and subscriptions. App-wide, so going back to
 /// Nearby keeps everything until Disconnect.
 ///
 /// A Bloc, because it is a state machine driven by events from the user (connect, read, ...) and
 /// from the device (link changed, value received). Stream subscriptions live here, not in the state.
+///
+/// Handlers run concurrently, so Disconnect can start while a connect or reconnect is still awaiting.
+/// Each of those bumps `_run`; older work checks its run after every await and stops.
 class SessionBloc extends Bloc<SessionEvent, SessionState> {
   SessionBloc(this._service, this._log) : super(const SessionState()) {
     on<SessionOpened>(_onOpened);
@@ -91,6 +100,7 @@ class SessionBloc extends Bloc<SessionEvent, SessionState> {
     on<_ValueReceived>(_onValueReceived);
   }
 
+  static const _connectTimeout = Duration(seconds: 10);
   static const _reconnectDelays = [1, 2, 4, 8, 10];
   static const _reconnectLimit = Duration(seconds: 60);
 
@@ -98,10 +108,15 @@ class SessionBloc extends Bloc<SessionEvent, SessionState> {
   final DeviceLog _log;
   StreamSubscription<BluetoothConnectionState>? _watcher;
   final _values = <String, StreamSubscription<Uint8List>>{};
-  // Bumped to stop a running reconnect loop.
-  int _reconnectRun = 0;
+  int _run = 0;
+  // Identifies the current watcher, so states queued by an old one are ignored.
+  int _link = 0;
+  final _linkUp = Stopwatch();
+  Future<void>? _disconnecting;
 
-  String get _id => state.remoteId!;
+  void _check(int run) {
+    if (run != _run) throw const _Superseded();
+  }
 
   // Connection
 
@@ -110,57 +125,93 @@ class SessionBloc extends Bloc<SessionEvent, SessionState> {
       if (state.status is Disconnected) add(const SessionConnectRequested());
       return;
     }
+    _run++;
     if (state.remoteId != null) await _disconnect(emit);
     emit(SessionState(remoteId: event.remoteId, name: event.name.isEmpty ? event.remoteId : event.name));
     add(const SessionConnectRequested());
   }
 
   Future<void> _onConnect(SessionConnectRequested event, Emitter<SessionState> emit) async {
-    if (state.remoteId == null) return;
+    final id = state.remoteId;
+    if (id == null) return;
+    final run = ++_run;
     emit(state.copyWith(status: const Connecting()));
     _log.event('Connecting to ${state.name}');
     try {
-      await _establish(emit);
-      emit(state.copyWith(status: const Connected()));
+      await _establish(id, run, emit);
+      _connected(emit);
       _log.event('Connected');
+    } on _Superseded {
+      return;
     } catch (error) {
+      if (run != _run) return;
       emit(state.copyWith(status: Disconnected(describeError(error))));
       _log.error('Connect failed: ${describeError(error)}');
     }
   }
 
+  void _connected(Emitter<SessionState> emit) {
+    emit(state.copyWith(status: const Connected()));
+    _linkUp
+      ..reset()
+      ..start();
+  }
+
   Future<void> _onDisconnect(SessionDisconnectRequested event, Emitter<SessionState> emit) => _disconnect(emit);
 
-  Future<void> _disconnect(Emitter<SessionState> emit) async {
-    if (state.remoteId == null) return;
-    _reconnectRun++;
+  /// A second Disconnect while one runs waits for it.
+  Future<void> _disconnect(Emitter<SessionState> emit) =>
+      _disconnecting ??= _runDisconnect(emit).whenComplete(() => _disconnecting = null);
+
+  Future<void> _runDisconnect(Emitter<SessionState> emit) async {
+    final id = state.remoteId;
+    if (id == null) return;
+    _run++;
+    // Unsubscribing only works over a live link; while reconnecting it would just time out.
+    final live = state.status is Connected;
     emit(state.copyWith(status: const Disconnecting()));
+    for (final c in state.chars.values.where((c) => live && c.subscribed)) {
+      try {
+        await _log.api('setNotifyValue(false) ${c.name}', () => _service.setNotify(c.ref, false));
+      } catch (error) {
+        _log.error('${c.name}: ${describeError(error)}');
+      }
+    }
     await _cancelValues();
     try {
-      await _log.api('disconnect()', () => _service.disconnect(_id));
+      await _log.api('disconnect()', () => _service.disconnect(id));
     } catch (error) {
       _log.error('Disconnect failed: ${describeError(error)}');
     }
     await _watcher?.cancel();
     _watcher = null;
+    _service.forget(id);
     emit(const SessionState());
     _log.event('Disconnected');
   }
 
   Future<void> _onRssi(RssiRequested event, Emitter<SessionState> emit) async {
+    final id = state.remoteId;
+    if (id == null) return;
     try {
-      final rssi = await _log.api('readRssi()', () => _service.readRssi(_id));
-      emit(state.copyWith(rssi: rssi));
+      final rssi = await _log.api('readRssi()', () => _service.readRssi(id));
+      if (state.remoteId == id) emit(state.copyWith(rssi: rssi));
     } catch (error) {
       _log.error('RSSI failed: ${describeError(error)}');
     }
   }
 
-  /// Connect, discover, then re-apply the user's subscriptions.
-  Future<void> _establish(Emitter<SessionState> emit) async {
-    await _log.api('connect(timeout: 10s)', () => _service.connect(_id, const Duration(seconds: 10)));
-    _watcher ??= _service.connectionStates(_id).listen((s) => add(_LinkChanged(s)));
-    final found = await _log.api('discoverServices()', () => _service.discoverServices(_id));
+  /// Connect, watch the new link, discover, then re-apply the user's subscriptions.
+  /// Fails if a subscribed characteristic is missing from the discovery.
+  Future<void> _establish(String id, int run, Emitter<SessionState> emit) async {
+    await _log.api('connect(timeout: 10s)', () => _service.connect(id, _connectTimeout));
+    _check(run);
+    await _watcher?.cancel();
+    _check(run);
+    final link = ++_link;
+    _watcher = _service.connectionStates(id).listen((s) => add(_LinkChanged(link, s)));
+    final found = await _log.api('discoverServices()', () => _service.discoverServices(id));
+    _check(run);
 
     // Keep existing characteristic states, so values and subscriptions survive rediscovery.
     final chars = <String, CharState>{};
@@ -172,18 +223,21 @@ class SessionBloc extends Bloc<SessionEvent, SessionState> {
         chars[key] =
             state.chars[key] ??
             CharState(
-              ref: CharacteristicRef(_id, service.serviceUuid, info.characteristicUuid),
+              ref: CharacteristicRef(id, service.serviceUuid, info.characteristicUuid),
               properties: info.properties,
             );
         keys.add(key);
       }
       groups.add(ServiceGroup(service.serviceUuid, keys));
     }
-    emit(state.copyWith(services: groups, chars: chars, mtu: tryOrNull(() => _service.mtu(_id))));
+    final missing = state.chars.values.where((c) => c.subscribed && !chars.containsKey(c.key)).map((c) => c.name);
+    if (missing.isNotEmpty) throw StateError('not found after discovery: ${missing.join(', ')}');
+
+    emit(state.copyWith(services: groups, chars: chars, mtu: tryOrNull(() => _service.mtu(id))));
     _log.event('Found ${found.length} services, ${chars.length} characteristics');
 
     for (final char in chars.values.where((c) => c.subscribed)) {
-      await _enableValues(char);
+      await _enableValues(char, run);
     }
   }
 
@@ -191,36 +245,53 @@ class SessionBloc extends Bloc<SessionEvent, SessionState> {
 
   Future<void> _onLinkChanged(_LinkChanged event, Emitter<SessionState> emit) async {
     // The stream emits the current state first; only a drop from `connected` is a link loss.
-    if (event.state != BluetoothConnectionState.disconnected || state.status is! Connected) return;
-    _log.event('Link lost');
+    if (event.link != _link || event.state != BluetoothConnectionState.disconnected || state.status is! Connected) {
+      return;
+    }
+    final id = state.remoteId!;
+    final run = ++_run;
+    _log.event('Link lost after ${_seconds(_linkUp.elapsed)} s');
     await _cancelValues();
+    if (run != _run) return;
     if (!state.autoReconnect) {
       _clearSubscriptions(emit);
       emit(state.copyWith(status: const Disconnected('link lost')));
       return;
     }
-    await _reconnect(emit);
+    try {
+      await _reconnect(id, run, emit);
+    } on _Superseded {
+      return;
+    }
   }
 
-  Future<void> _reconnect(Emitter<SessionState> emit) async {
-    final run = ++_reconnectRun;
+  Future<void> _reconnect(String id, int run, Emitter<SessionState> emit) async {
     final watch = Stopwatch()..start();
     for (var attempt = 1; ; attempt++) {
-      if (run != _reconnectRun) return;
       emit(state.copyWith(status: Reconnecting(attempt)));
       _log.event('Reconnecting, attempt $attempt');
       try {
-        await _establish(emit);
-        if (run != _reconnectRun) return;
+        await _establish(id, run, emit);
         final resumed = state.chars.values.where((c) => c.subscribed).map((c) => c.name).toList()..sort();
-        emit(state.copyWith(status: const Connected()));
+        _connected(emit);
         _log.event(
-          'Reconnected after ${(watch.elapsedMilliseconds / 1000).toStringAsFixed(1)} s'
+          'Reconnected after ${_seconds(watch.elapsed)} s'
           '${resumed.isEmpty ? '' : ', resumed ${resumed.join(', ')}'}',
         );
         return;
+      } on _Superseded {
+        rethrow;
       } catch (error) {
+        _check(run);
         _log.error('Reconnect attempt $attempt failed: ${describeError(error)}');
+        // Drop any half-open link or pending connect before the next attempt.
+        await _cancelValues();
+        try {
+          await _log.api('disconnect()', () => _service.disconnect(id));
+        } catch (error) {
+          _log.error('Disconnect failed: ${describeError(error)}');
+        }
+        _check(run);
       }
       final delay = Duration(seconds: _reconnectDelays[(attempt - 1).clamp(0, _reconnectDelays.length - 1)]);
       if (watch.elapsed + delay > _reconnectLimit) {
@@ -230,8 +301,11 @@ class SessionBloc extends Bloc<SessionEvent, SessionState> {
         return;
       }
       await Future<void>.delayed(delay);
+      _check(run);
     }
   }
+
+  static String _seconds(Duration d) => (d.inMilliseconds / 1000).toStringAsFixed(1);
 
   void _clearSubscriptions(Emitter<SessionState> emit) {
     emit(state.copyWith(chars: {for (final e in state.chars.entries) e.key: e.value.copyWith(subscribed: false)}));
@@ -264,7 +338,7 @@ class SessionBloc extends Bloc<SessionEvent, SessionState> {
   Future<void> _onSubscribe(SubscribeRequested event, Emitter<SessionState> emit) =>
       _perform(event.key, event.on ? 'Subscribing…' : 'Unsubscribing…', emit, (c) async {
         if (event.on) {
-          await _enableValues(c);
+          await _enableValues(c, _run);
           _update(emit, event.key, (c) => c.copyWith(subscribed: true));
           _log.event('${c.name} subscribed');
         } else {
@@ -292,13 +366,18 @@ class SessionBloc extends Bloc<SessionEvent, SessionState> {
   }
 
   /// Listens first, then enables notify / indicate, so no value is missed.
-  Future<void> _enableValues(CharState c) async {
+  Future<void> _enableValues(CharState c, int run) async {
+    _check(run);
     await _values.remove(c.key)?.cancel();
-    _values[c.key] = _service.values(c.ref).listen((value) => add(_ValueReceived(c.key, value)));
+    _check(run);
+    final subscription = _service.values(c.ref).listen((value) => add(_ValueReceived(c.key, value)));
+    _values[c.key] = subscription;
     try {
       await _log.api('setNotifyValue(true) ${c.name}', () => _service.setNotify(c.ref, true));
+      _check(run);
     } catch (_) {
-      await _values.remove(c.key)?.cancel();
+      if (_values[c.key] == subscription) _values.remove(c.key);
+      await subscription.cancel();
       rethrow;
     }
   }
@@ -321,6 +400,8 @@ class SessionBloc extends Bloc<SessionEvent, SessionState> {
     _update(emit, key, (c) => c.copyWith(busy: busy, error: null));
     try {
       await body(c);
+    } on _Superseded {
+      // Disconnect or a link loss replaced this action; nothing to report.
     } catch (error) {
       _update(emit, key, (c) => c.copyWith(error: describeError(error)));
       _log.error('${c.name}: ${describeError(error)}');

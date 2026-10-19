@@ -7,12 +7,15 @@
 <style>
   :root {
     --bg: #f2f2f7; --card: #fff; --text: #1c1c1e; --muted: #6c6c70; --line: #e5e5ea; --soft: #f2f2f7;
-    --accent: #0a66d8; --ok: #248a3d; --bad: #d70015; --warn: #c93400; --chip: #e8f0fe; --chip-text: #1a56b8;
+    --accent: #0a66d8; --ok: #248a3d; --bad: #d70015;
+    /* operation colors, same as the apps */
+    --read: #007aff; --write: #af52de; --write-nr: #5856d6; --notify: #34c759; --indicate: #30b0c7;
+    --link: #ff9500; --warn: #ff3b30;
   }
   @media (prefers-color-scheme: dark) {
     :root {
       --bg: #000; --card: #1c1c1e; --text: #f2f2f7; --muted: #98989f; --line: #38383a; --soft: #2c2c2e;
-      --accent: #409cff; --ok: #30d158; --bad: #ff453a; --warn: #ff9f0a; --chip: #1f2c44; --chip-text: #9cc3ff;
+      --accent: #409cff; --ok: #30d158; --bad: #ff453a;
     }
   }
   * { box-sizing: border-box; }
@@ -20,7 +23,6 @@
   main { max-width: 760px; margin: 0 auto; padding: 16px; }
   h1 { font-size: 22px; margin: 4px 0 12px; }
   .card { background: var(--card); border-radius: 12px; overflow: hidden; margin-bottom: 18px; }
-  .section-title { font-size: 13px; color: var(--muted); margin: 0 4px 6px; display: flex; gap: 8px; align-items: baseline; }
   .mono { font-family: ui-monospace, Menlo, monospace; font-size: 13px; }
   .muted { color: var(--muted); }
   .status { padding: 14px 16px; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
@@ -33,25 +35,29 @@
   input, select { font: inherit; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line); background: var(--card); color: var(--text); }
   input.wide { flex: 1; min-width: 120px; }
   input.num { width: 70px; }
+  .mock { border-top: 1px solid var(--line); padding: 10px 16px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .mock #mock-status { flex: 1; min-width: 200px; }
   details.drop { border-top: 1px solid var(--line); padding: 10px 16px; }
   details.drop summary { cursor: pointer; }
   details.drop table { border-collapse: collapse; margin-top: 8px; }
   details.drop td { padding: 2px 12px 2px 0; vertical-align: top; }
-  .row { display: flex; gap: 12px; padding: 11px 16px; border-top: 1px solid var(--line); cursor: pointer; align-items: center; }
-  .row:first-child { border-top: 0; }
+  .svc-head { padding: 11px 16px; border-bottom: 1px solid var(--line); display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; }
+  .row { display: flex; gap: 10px; padding: 10px 16px; border-top: 1px solid var(--line); cursor: pointer; align-items: center; }
+  .svc-head + .row { border-top: 0; }
   .row:hover { background: var(--soft); }
-  .row .main { flex: 1; min-width: 0; }
-  .row .name { font-weight: 600; display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
-  .row .value { margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .row .main { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; }
+  .row .uuid { font-size: 12px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .row .chev { color: var(--muted); }
-  .chip { background: var(--chip); color: var(--chip-text); border-radius: 999px; padding: 0 7px; font-size: 12px; font-weight: 500; }
-  .badge { font-size: 13px; white-space: nowrap; }
-  .badge.live { color: var(--ok); }
-  .badge.paused { color: var(--warn); }
+  .sub { font-size: 13px; white-space: nowrap; color: var(--muted); }
+  .sub.on { color: var(--notify); }
+  .chip { --c: var(--read); color: var(--c); background: color-mix(in srgb, var(--c) 15%, transparent);
+    border-radius: 999px; padding: 1px 8px; font-size: 12px; font-weight: 500; white-space: nowrap; }
+  .op-read { --c: var(--read); } .op-write { --c: var(--write); } .op-write-without-response { --c: var(--write-nr); }
+  .op-notify { --c: var(--notify); } .op-indicate { --c: var(--indicate); }
   dialog { border: 0; border-radius: 14px; padding: 0; width: min(520px, calc(100vw - 32px)); background: var(--card); color: var(--text); }
   dialog::backdrop { background: rgba(0, 0, 0, .35); }
   .dlg-head { display: flex; align-items: center; padding: 14px 16px; border-bottom: 1px solid var(--line); }
-  .dlg-head h2 { margin: 0; font-size: 17px; flex: 1; }
+  .dlg-head h2 { margin: 0; font-size: 17px; flex: 1; display: flex; gap: 8px; align-items: center; }
   .dlg-body { padding: 12px 16px 16px; }
   .field { display: grid; grid-template-columns: 110px 1fr; gap: 4px 10px; margin: 8px 0; align-items: baseline; }
   .field > :first-child { color: var(--muted); }
@@ -61,9 +67,15 @@
   #log { position: fixed; left: 0; right: 0; bottom: 0; background: var(--card); border-top: 1px solid var(--line); }
   #log .bar { display: flex; align-items: center; gap: 10px; padding: 8px 16px; cursor: pointer; }
   #log .latest { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  #log pre { display: none; margin: 0; padding: 4px 16px 10px; height: 220px; overflow: auto; white-space: pre-wrap; }
-  #log.open pre { display: block; }
-  body.log-open { padding-bottom: 300px; }
+  #log .panel { display: none; }
+  #log.open .panel { display: block; }
+  .legend { display: flex; flex-wrap: wrap; gap: 4px 12px; padding: 0 16px 4px; font-size: 12px; }
+  #log-lines { margin: 0; padding: 4px 16px 10px; height: 220px; overflow: auto; white-space: pre-wrap; }
+  body.log-open { padding-bottom: 320px; }
+  .k-read { color: var(--read); } .k-write { color: var(--write); }
+  .k-notify { color: var(--notify); } .k-indicate { color: var(--indicate); }
+  .k-subscribe { color: var(--notify); opacity: .6; } .k-subscribe.k-indicate { color: var(--indicate); }
+  .k-link { color: var(--link); } .k-set { color: var(--muted); } .k-warn { color: var(--warn); }
 </style>
 </head>
 <body>
@@ -76,14 +88,21 @@
       <button id="bluetooth-btn" class="danger"></button>
       <button id="advertising-btn"></button>
     </div>
+    <div class="mock">
+      <strong>Mock link drops</strong>
+      every <input class="num" type="number" min="10" step="1" id="mock-interval"> s,
+      off <input class="num" type="number" min="1" step="1" id="mock-off"> s
+      <button id="mock-btn"></button>
+      <span class="muted" id="mock-status"></span>
+    </div>
     <details class="drop" id="drop" hidden>
       <summary><strong>Last link drop:</strong> <span id="drop-summary"></span></summary>
       <table class="mono" id="drop-events"></table>
     </details>
   </div>
-  <p class="hint" style="margin:-10px 4px 18px">Turning Bluetooth off drops every phone's link, like walking out of range,
-    and also disconnects this Mac's other Bluetooth devices. When it is back on, the fixture advertises again by itself;
-    the phone reconnects and subscribes again.</p>
+  <p class="hint" style="margin:-10px 4px 18px">A Mac peripheral can only drop a phone's link by turning Bluetooth off,
+    like walking out of range; this also disconnects the Mac's other Bluetooth devices. Mock link drops repeat that
+    on a timer. When Bluetooth is back on, the fixture advertises again by itself; the phone reconnects and subscribes again.</p>
 
   <div id="services"></div>
 </main>
@@ -95,17 +114,29 @@
 
 <div id="log">
   <div class="bar" id="log-bar">
-    <strong>Log</strong><span class="latest mono muted" id="log-latest"></span>
+    <strong>Log</strong><span class="latest mono" id="log-latest"></span>
     <button id="log-clear">Clear</button><span class="muted" id="log-arrow">▴</span>
   </div>
-  <pre class="mono" id="log-lines"></pre>
+  <div class="panel">
+    <div class="legend">
+      <span class="k-read">read</span><span class="k-write">write</span><span class="k-notify">notify</span>
+      <span class="k-indicate">indicate</span><span class="k-subscribe">subscribe</span><span class="k-link">link</span>
+      <span class="k-set">set here</span><span class="k-warn">warning</span>
+    </div>
+    <div class="mono" id="log-lines"></div>
+  </div>
 </div>
 
 <script>
 const $ = (id) => document.getElementById(id);
 let state = null;
-let openChar = null; // name of the characteristic whose dialog is open
+let openOp = null; // { name, op } of the open dialog
 const rows = {};
+
+const OPS = ["read", "write", "write-without-response", "notify", "indicate"];
+const LABEL = { "write-without-response": "write without response" };
+const chip = (op) => `<span class="chip op-${op}">${LABEL[op] || op}</span>`;
+const isStream = (op) => op === "notify" || op === "indicate";
 
 // ---------- helpers
 
@@ -116,29 +147,33 @@ async function call(name, body = {}) {
     body: JSON.stringify(body),
   });
   const error = res.ok ? "" : (await res.json().catch(() => ({}))).error || res.statusText;
-  const slot = document.querySelector("#dlg-body .error");
+  const slot = $("dialog").open && document.querySelector("#dlg-body .error");
   if (slot) slot.textContent = error;
   else if (error) alert(error);
 }
 
 const phones = (n) => (n === 1 ? "1 phone" : `${n} phones`);
+const clock = (t) => new Date(t * 1000).toLocaleTimeString([], { hour12: false });
 
 function counter(hex) {
   const b = hex.split(" ").filter(Boolean).map((h) => parseInt(h, 16));
   return b.length === 4 ? (b[0] | (b[1] << 8) | (b[2] << 16) | (b[3] << 24)) >>> 0 : null;
 }
 
-function showValue(hex, isStream) {
+function showValue(hex, asCounter) {
   if (!hex) return "(empty)";
-  const n = isStream ? counter(hex) : null;
+  const n = asCounter ? counter(hex) : null;
   return n === null ? hex : `${hex} = ${n}`;
 }
+
+const showStored = (v) => `${v.hex || "(empty)"}${v.text ? `  "${v.text}"` : ""}`;
+const showLast = (l, asCounter) => (l ? `${showValue(l.value, asCounter)} at ${l.time}` : "nothing yet");
 
 function findChar(name) {
   for (const s of state.services) for (const c of s.characteristics) if (c.name === name) return [s, c];
 }
 
-// ---------- status and drop timeline
+// ---------- status, mock link drops and drop timeline
 
 function renderStatus(d, drop) {
   const on = d.bluetooth === "on";
@@ -163,42 +198,47 @@ function renderStatus(d, drop) {
   }
 }
 
-// ---------- characteristic rows (same layout as the app)
-
-function rowText(c) {
-  const stream = !!c.stream;
-  let value;
-  if (c.stored) value = `${c.stored.hex || "(empty)"}${c.stored.text ? `  "${c.stored.text}"` : ""}`;
-  else value = c.last && c.last.op === "sent" ? showValue(c.last.value, true) : "–";
-  if (c.last) value += ` · ${c.last.op} ${c.last.time}`;
-
-  let badge = "", cls = "badge";
-  if (stream) {
-    if (!c.subscribers.length) badge = c.stream.paused ? "paused · no phone subscribed" : "no phone subscribed";
-    else if (c.stream.paused) { badge = `◉ paused · ${phones(c.subscribers.length)}`; cls += " paused"; }
-    else { badge = `◉ sending to ${phones(c.subscribers.length)} · ${c.stream.sent}`; cls += " live"; }
-    if (!c.subscribers.length) cls += " muted";
+function renderMock(m) {
+  for (const [id, value] of [["mock-interval", m.interval], ["mock-off", m.off]]) {
+    if (document.activeElement !== $(id) && (m.running || !$(id).value)) $(id).value = value;
   }
-  return { value, badge, cls };
+  $("mock-btn").textContent = m.running ? "Stop" : "Start";
+  $("mock-btn").className = m.running ? "danger" : "";
+  tickMock();
 }
+
+function tickMock() {
+  const m = state && state.mock;
+  if (!m) return;
+  if (!m.running) { $("mock-status").textContent = m.count ? `Stopped · ${m.count} drops` : "Stopped"; return; }
+  const left = m.next ? Math.round(m.next - Date.now() / 1000) : null;
+  const next = left === null ? "" : left > 0 ? ` · next at ${clock(m.next)} (in ${left} s)` : " · Bluetooth off now";
+  $("mock-status").textContent = `Running · ${m.count} drops${next}`;
+}
+setInterval(tickMock, 1000);
+
+$("mock-btn").onclick = () => call("mock", state.mock.running
+  ? { on: false }
+  : { on: true, interval: Number($("mock-interval").value), off: Number($("mock-off").value) });
+
+// ---------- services: one row per (characteristic, operation), same layout as the apps
 
 function buildServices(services) {
   const root = $("services");
   for (const s of services) {
     root.insertAdjacentHTML("beforeend",
-      `<div class="section-title">${s.name} <span class="mono">${s.uuid}</span></div><div class="card" data-service="${s.name}"></div>`);
+      `<div class="card"><div class="svc-head"><strong>${s.name}</strong><span class="mono muted">${s.uuid}</span></div></div>`);
     const card = root.lastElementChild;
     for (const c of s.characteristics) {
-      card.insertAdjacentHTML("beforeend", `<div class="row">
-        <div class="main">
-          <div class="name">${c.name} ${c.properties.map((p) => `<span class="chip">${p}</span>`).join("")}</div>
-          <div class="value mono muted"></div>
-        </div>
-        <span class="badge"></span><span class="chev">›</span>
-      </div>`);
-      const row = card.lastElementChild;
-      row.onclick = () => openDialog(c.name);
-      rows[c.name] = { value: row.querySelector(".value"), badge: row.querySelector(".badge") };
+      for (const op of OPS.filter((p) => c.properties.includes(p))) {
+        card.insertAdjacentHTML("beforeend", `<div class="row">
+          <div class="main"><strong>${c.name}</strong>${chip(op)}<span class="uuid mono muted">${c.uuid}</span></div>
+          ${isStream(op) ? `<span class="sub"></span>` : ""}<span class="chev">›</span>
+        </div>`);
+        const row = card.lastElementChild;
+        row.onclick = () => openDialog(c.name, op);
+        if (isStream(op)) rows[c.name] = row.querySelector(".sub");
+      }
     }
   }
 }
@@ -206,15 +246,17 @@ function buildServices(services) {
 function renderRows(services) {
   for (const s of services) {
     for (const c of s.characteristics) {
-      const t = rowText(c);
-      rows[c.name].value.textContent = t.value;
-      rows[c.name].badge.textContent = t.badge;
-      rows[c.name].badge.className = t.cls;
+      const sub = rows[c.name];
+      if (!sub) continue;
+      const on = c.subscribers.length > 0;
+      sub.className = `sub${on ? " on" : ""}`;
+      sub.textContent = on ? `◉ ${c.stream.sent}` : "○";
+      sub.title = on ? `${phones(c.subscribers.length)} subscribed, ${c.stream.sent} sent` : "no phone subscribed";
     }
   }
 }
 
-// ---------- dialog (same actions the app offers, seen from the fixture)
+// ---------- dialog: only the tapped operation, seen from the fixture
 
 function valueInput() {
   return `<select data-format><option value="hex">hex</option><option value="utf8">text</option></select>
@@ -225,26 +267,28 @@ function readInput(root) {
   return { text: root.querySelector("[data-input]").value, format: root.querySelector("[data-format]").value };
 }
 
-function openDialog(name) {
+function openDialog(name, op) {
   const [service, c] = findChar(name);
-  openChar = name;
-  $("dlg-title").textContent = c.name;
+  openOp = { name, op };
+  history.replaceState(null, "", `#${name}-${op}`);
+  $("dlg-title").innerHTML = `${c.name} ${chip(op)}`;
   const body = $("dlg-body");
-  body.innerHTML = `<div class="mono muted">${c.uuid} · ${service.name} · ${c.properties.join(" ")}</div>`;
+  body.innerHTML = `<div class="mono muted">${c.uuid} · ${service.name}</div>`;
 
-  if (c.stored) {
-    const writable = c.properties.some((p) => p.startsWith("write"));
+  if (op === "read") {
     body.insertAdjacentHTML("beforeend", `
-      <div class="field"><span>Phones read</span><span class="mono" data-show="stored"></span></div>
-      <div class="field"><span>Last</span><span data-show="last"></span></div>
-      <div class="hint">${writable ? "A phone's write replaces this value." : "Phones can only read this."}</div>
+      <div class="field"><span>Phones get</span><span class="mono" data-show="stored"></span></div>
+      <div class="field"><span>Last read</span><span class="mono" data-show="read"></span></div>
       <div class="actions">${valueInput()}<button class="primary" data-act="set">Set</button></div>
       <div class="hint">Set sends nothing; the phone gets it on its next read.</div>`);
     body.querySelector("[data-act=set]").onclick = () => call("stored", { char: name, ...readInput(body) });
-  }
-
-  if (c.stream) {
-    const kind = c.properties.includes("indicate") ? "indications" : "notifications";
+  } else if (op.startsWith("write")) {
+    body.insertAdjacentHTML("beforeend", `
+      <div class="field"><span>Last write</span><span class="mono" data-show="write"></span></div>
+      <div class="field"><span>Stored</span><span class="mono" data-show="stored"></span></div>
+      <div class="hint">A phone's write replaces this value. The Mac can't tell a write with response from one without.</div>`);
+  } else {
+    const kind = op === "indicate" ? "indications" : "notifications";
     body.insertAdjacentHTML("beforeend", `
       <div class="field"><span>Subscribed</span><span data-show="subs"></span></div>
       <div class="field"><span>Sending</span><span class="actions" style="margin:0">
@@ -252,7 +296,7 @@ function openDialog(name) {
         <button data-act="interval">Apply</button><button data-act="pause"></button></span></div>
       <div class="field"><span>Counter</span><span class="actions" style="margin:0">
         <strong class="mono" data-show="counter"></strong><button data-act="reset">Reset</button></span></div>
-      <div class="field"><span>Last</span><span class="mono" data-show="last"></span></div>
+      <div class="field"><span>Last sent</span><span class="mono" data-show="sent"></span></div>
       <div class="actions"><button class="primary" data-act="next">Send next counter now</button></div>
       <div class="actions">${valueInput()}<button data-act="send">Send bytes</button></div>
       <div class="hint">Sent as ${kind} (u32 little-endian counter), only to subscribed phones.</div>`);
@@ -267,34 +311,66 @@ function openDialog(name) {
 
   body.insertAdjacentHTML("beforeend", `<div class="error"></div>`);
   renderDialog();
-  $("dialog").showModal();
+  if (!$("dialog").open) $("dialog").showModal();
 }
 
 function renderDialog() {
-  if (!openChar) return;
-  const [, c] = findChar(openChar);
+  if (!openOp) return;
+  const [, c] = findChar(openOp.name);
   const body = $("dlg-body");
   const set = (key, text) => { const el = body.querySelector(`[data-show=${key}]`); if (el) el.textContent = text; };
-  if (c.stored) set("stored", `${c.stored.hex || "(empty)"}${c.stored.text ? `  "${c.stored.text}"` : ""}`);
+  if (c.stored) set("stored", showStored(c.stored));
+  set("read", c.last.read ? c.last.read.time : "not read yet");
+  set("write", showLast(c.last.write, false));
   if (c.stream) {
     set("subs", c.subscribers.length ? `${phones(c.subscribers.length)} (${c.subscribers.map((p) => p.slice(0, 8) + "…").join(", ")})` : "no phone");
     set("counter", c.stream.counter);
+    set("sent", showLast(c.last.sent, true));
     body.querySelector("[data-act=pause]").textContent = c.stream.paused ? "Resume" : "Pause";
   }
-  set("last", c.last ? `${c.last.op} ${showValue(c.last.value, !!c.stream)} at ${c.last.time}` : "nothing yet");
 }
 
 $("dlg-close").onclick = () => $("dialog").close();
-$("dialog").addEventListener("close", () => (openChar = null));
+$("dialog").addEventListener("close", () => {
+  openOp = null;
+  history.replaceState(null, "", location.pathname);
+});
 
-// ---------- log (collapsed to the latest line, like the app)
+// #NOTIFY opens that characteristic's notify / indicate dialog, #VALUE-read a given operation.
+function openFromHash() {
+  const [name, ...rest] = location.hash.slice(1).split("-");
+  const found = name && findChar(name);
+  if (!found) return;
+  const props = found[1].properties;
+  const op = rest.length ? rest.join("-") : props.find(isStream) || props[0];
+  if (props.includes(op)) openDialog(name, op);
+}
 
-function appendLog(line) {
-  const pre = $("log-lines");
-  const atBottom = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 4;
-  pre.textContent += line + "\n";
+// ---------- log: one element per line, colored by kind; collapsed to the latest line
+
+const MAX_LINES = 1000;
+
+function logClass(line, kind) {
+  if (kind === "subscribe") return line.includes("INDICATE") ? "k-subscribe k-indicate" : "k-subscribe";
+  return `k-${kind}`;
+}
+
+function appendLog(line, kind = "info") {
+  const box = $("log-lines");
+  const atBottom = box.scrollTop + box.clientHeight >= box.scrollHeight - 4;
+  const el = document.createElement("div");
+  el.className = logClass(line, kind);
+  el.textContent = line;
+  box.append(el);
+  while (box.childElementCount > MAX_LINES) box.firstElementChild.remove();
+  $("log-latest").className = `latest mono ${el.className}`;
   $("log-latest").textContent = line;
-  if (atBottom) pre.scrollTop = pre.scrollHeight;
+  if (atBottom) box.scrollTop = box.scrollHeight;
+}
+
+function clearLog() {
+  $("log-lines").replaceChildren();
+  $("log-latest").textContent = "";
 }
 
 $("log-bar").onclick = (e) => {
@@ -304,7 +380,7 @@ $("log-bar").onclick = (e) => {
   $("log-arrow").textContent = $("log").classList.contains("open") ? "▾" : "▴";
   $("log-lines").scrollTop = $("log-lines").scrollHeight;
 };
-$("log-clear").onclick = () => { $("log-lines").textContent = ""; $("log-latest").textContent = ""; };
+$("log-clear").onclick = clearLog;
 
 // ---------- wiring
 
@@ -315,20 +391,20 @@ function render(s) {
   const first = !state;
   if (first) buildServices(s.services);
   state = s;
-  // #NOTIFY in the URL opens that characteristic's dialog.
-  if (first && location.hash && findChar(location.hash.slice(1))) openDialog(location.hash.slice(1));
+  if (first) openFromHash();
   renderStatus(s.device, s.drop);
+  renderMock(s.mock);
   renderRows(s.services);
   renderDialog();
 }
 
 const events = new EventSource("/events");
-events.onopen = () => { $("log-lines").textContent = ""; };
+events.onopen = clearLog; // the fixture resends its recent log
 events.onerror = () => { $("dot").className = "dot"; $("status").textContent = "Fixture not running"; };
 events.onmessage = (e) => {
   const event = JSON.parse(e.data);
   if (event.type === "state") render(event.state);
-  else appendLog(event.line);
+  else appendLog(event.line, event.kind);
 };
 </script>
 </body>

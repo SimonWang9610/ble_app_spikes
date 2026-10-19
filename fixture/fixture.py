@@ -5,6 +5,7 @@ import asyncio
 import logging
 import shutil
 import struct
+import subprocess
 import time
 from collections import deque
 
@@ -24,7 +25,6 @@ GATT = {
         "uuid": "f0e10000-5a3e-4c1a-9d2b-1b2c3d4e5f60",
         "characteristics": {
             "VALUE": ("f0e10001-5a3e-4c1a-9d2b-1b2c3d4e5f60", ["read", "write", "write-without-response"]),
-            "INFO": ("f0e10002-5a3e-4c1a-9d2b-1b2c3d4e5f60", ["read"]),
         },
     },
     "STREAM": {
@@ -50,6 +50,9 @@ BT_STATES = {0: "unknown", 1: "resetting", 2: "unsupported", 3: "unauthorized", 
 
 log = logging.getLogger("fixture")
 
+# Log line kinds, the page colors lines by them.
+READ, WRITE, SUBSCRIBE, LINK, SET, WARN = ({"kind": k} for k in ("read", "write", "subscribe", "link", "set", "warn"))
+
 
 class Stream:
     """What one notify / indicate characteristic sends: a counter every `interval` seconds."""
@@ -62,6 +65,19 @@ class Stream:
         self.due = 0.0
 
 
+class Mock:
+    """Repeating link drops: Bluetooth off for `off` seconds every `interval` seconds."""
+
+    def __init__(self):
+        self.running = False
+        self.interval = 30.0
+        self.off = 3.0
+        self.count = 0
+        self.next = None  # epoch of the next drop
+        self.task = None
+        self.bt_off = False  # Bluetooth is off because of the mock
+
+
 class Fixture:
     """The peripheral: stored values, streams, publishing, and what the control page shows."""
 
@@ -70,9 +86,10 @@ class Fixture:
         self.server.read_request_func = self._on_read
         self.server.write_request_func = self._on_write
         # Returned to phones on read; VALUE is also replaced by their writes.
-        self.stored = {"VALUE": b"\x01\x02\x03\x04", "INFO": b"hm-ble-fixture"}
+        self.stored = {"VALUE": b"\x01\x02\x03\x04"}
         self.streams = {"NOTIFY": Stream(), "INDICATE": Stream()}
-        self.last = {}  # characteristic -> {"op", "value", "time"}
+        self.mock = Mock()
+        self.last = {}  # characteristic -> "read" / "write" / "set" / "sent" -> {"value", "time"}
         self.published = False
         self.bt_state = "unknown"
         self.centrals = {}  # central id -> subscribed characteristic names
@@ -85,8 +102,8 @@ class Fixture:
     def _on_read(self, char, **_):
         name = NAMES.get(str(char.uuid).lower(), str(char.uuid))
         value = self.stored.get(name, b"")
-        self._record(name, "phone read", value)
-        log.info("%s phone read %s", name, _show(value))
+        self._record(name, "read", value)
+        log.info("%s phone read %s", name, _show(value), extra=READ)
         return bytearray(value)
 
     def _on_write(self, char, value, **_):
@@ -94,11 +111,11 @@ class Fixture:
         value = bytes(value)
         if name == "VALUE":
             self.stored[name] = value
-        self._record(name, "phone wrote", value)
-        log.info("%s phone wrote %s", name, _show(value))
+        self._record(name, "write", value)
+        log.info("%s phone wrote %s", name, _show(value), extra=WRITE)
 
     def _record(self, name, op, value):
-        self.last[name] = {"op": op, "value": value.hex(" "), "time": time.strftime("%H:%M:%S")}
+        self.last.setdefault(name, {})[op] = {"value": value.hex(" "), "time": time.strftime("%H:%M:%S")}
         self.changed()
 
     # State for the control page
@@ -112,7 +129,7 @@ class Fixture:
         for service, s in GATT.items():
             characteristics = []
             for name, (uuid, props) in s["characteristics"].items():
-                char = {"name": name, "uuid": uuid, "properties": props, "last": self.last.get(name)}
+                char = {"name": name, "uuid": uuid, "properties": props, "last": self.last.get(name, {})}
                 if name in self.stored:
                     char["stored"] = _value_json(self.stored[name])
                 if name in self.streams:
@@ -136,6 +153,13 @@ class Fixture:
             },
             "services": services,
             "drop": self._drop_json(),
+            "mock": {
+                "running": self.mock.running,
+                "interval": self.mock.interval,
+                "off": self.mock.off,
+                "count": self.mock.count,
+                "next": self.mock.next,
+            },
         }
 
     def _drop_json(self):
@@ -196,17 +220,72 @@ class Fixture:
         self.published = True
         if self.drop and self.drop.get("on") and not self.drop.get("published"):
             self.drop["published"] = time.time()
-        log.info("Services published")
+        log.info("Services published", extra=LINK)
         await self.set_advertising(True)
 
     async def set_bluetooth(self, on):
-        """Turns the Mac's Bluetooth radio off or on (blueutil). Off drops every phone's link."""
+        await _power(on)
+        log.info("Turning Bluetooth %s from the page", "on" if on else "off", extra=SET)
+
+    async def set_mock(self, on, interval=None, off=None):
+        """Starts (or restarts with new timings) or stops the repeating link drops."""
+        mock = self.mock
+        if not on:
+            if mock.running:
+                await self._stop_mock()
+                log.info("Mock link drops stopped after %d drops", mock.count, extra=LINK)
+            return
+        interval = _number(mock.interval if interval is None else interval, "interval")
+        off = _number(mock.off if off is None else off, "off")
+        if interval < 10:
+            raise ValueError("interval must be at least 10 s")
+        if off < 1:
+            raise ValueError("off must be at least 1 s")
+        if off >= interval:
+            raise ValueError("off must be shorter than the interval")
         if not shutil.which("blueutil"):
             raise ValueError("blueutil not found, run: brew install blueutil")
-        process = await asyncio.create_subprocess_exec("blueutil", "--power", "1" if on else "0")
-        if await process.wait() != 0:
-            raise ValueError("blueutil failed")
-        log.info("Turning Bluetooth %s from the page", "on" if on else "off")
+        await self._stop_mock()
+        mock.interval, mock.off, mock.count, mock.running = interval, off, 0, True
+        mock.task = asyncio.create_task(self._mock_drops())
+        log.info("Mock link drops every %g s, Bluetooth off for %g s", interval, off, extra=LINK)
+
+    async def _stop_mock(self):
+        mock = self.mock
+        if mock.task:
+            mock.task.cancel()
+            try:
+                await mock.task
+            except asyncio.CancelledError:
+                pass
+            mock.task = None
+        if mock.bt_off:
+            await _power(True)
+            mock.bt_off = False
+        mock.running, mock.next = False, None
+        self.changed()
+
+    async def _mock_drops(self):
+        """A macOS peripheral can't drop a central itself; turning Bluetooth off drops them all."""
+        mock = self.mock
+        mock.next = time.time() + mock.interval
+        self.changed()
+        try:
+            while True:
+                await asyncio.sleep(max(0.0, mock.next - time.time()))
+                log.info("Mock link drop %d: Bluetooth off for %g s", mock.count + 1, mock.off, extra=LINK)
+                mock.bt_off = True
+                await _power(False)
+                await asyncio.sleep(mock.off)
+                await _power(True)
+                mock.bt_off = False
+                mock.count += 1
+                mock.next += mock.interval
+                self.changed()
+        except ValueError as error:
+            log.warning("Mock link drops stopped: %s", error, extra=WARN)
+            mock.running, mock.next, mock.task = False, None, None
+            self.changed()
 
     async def set_advertising(self, on):
         delegate = self.server.peripheral_manager_delegate
@@ -214,11 +293,11 @@ class Fixture:
             try:
                 await delegate.start_advertising({CBAdvertisementDataLocalNameKey: NAME})
             except TimeoutError:
-                log.warning("Advertising did not confirm within 2 s")
-            log.info("Advertising as %s", NAME)
+                log.warning("Advertising did not confirm within 2 s", extra=WARN)
+            log.info("Advertising as %s", NAME, extra=LINK)
         else:
             delegate.peripheral_manager.stopAdvertising()
-            log.info("Advertising stopped")
+            log.info("Advertising stopped", extra=LINK)
         self.changed()
 
     def set_stored(self, name, value):
@@ -226,8 +305,8 @@ class Fixture:
         if name not in self.stored:
             raise ValueError(f"{name} has no stored value")
         self.stored[name] = value
-        self._record(name, "set here", value)
-        log.info("%s set to %s (phones read it next)", name, _show(value))
+        self._record(name, "set", value)
+        log.info("%s set to %s (phones read it next)", name, _show(value), extra=SET)
 
     def set_stream(self, name, interval=None, paused=None):
         stream = self._stream(name)
@@ -235,12 +314,12 @@ class Fixture:
             stream.interval = max(0.05, float(interval))
         if paused is not None:
             stream.paused = bool(paused)
-        log.info("%s %s every %.2f s", name, "paused, was sending" if stream.paused else "sending", stream.interval)
+        log.info("%s %s every %.2f s", name, "paused, was sending" if stream.paused else "sending", stream.interval, extra=SET)
         self.changed()
 
     def reset_counter(self, name):
         self._stream(name).counter = 0
-        log.info("%s counter reset", name)
+        log.info("%s counter reset", name, extra=SET)
         self.changed()
 
     def send(self, name, value=None):
@@ -248,27 +327,28 @@ class Fixture:
         stream = self._stream(name)
         phones = self.subscribers(name)
         if not phones:
-            log.info("%s not sent, no phone subscribed", name)
+            log.info("%s not sent, no phone subscribed", name, extra=WARN)
             return
         counter = None
         if value is None:
             stream.counter += 1
             counter = stream.counter
             value = struct.pack("<I", counter)
-        _, uuid, _ = CHARS[name]
+        _, uuid, props = CHARS[name]
         # Sent directly, not stored on the characteristic: a stored value would make CoreBluetooth
         # treat it as cached, and re-adding the service would then fail.
         pm = self.server.peripheral_manager_delegate.peripheral_manager
         char = self.server.get_characteristic(uuid).obj
         if not pm.updateValue_forCharacteristic_onSubscribedCentrals_(NSData.dataWithBytes_length_(value, len(value)), char, None):
-            log.warning("%s not sent, CoreBluetooth's send queue is full", name)
+            log.warning("%s not sent, CoreBluetooth's send queue is full", name, extra=WARN)
             return
         stream.sent += 1
         self._record(name, "sent", value)
         d = self.drop
         if d and name in d["resubscribed"] and name not in d["first_sent"]:
             d["first_sent"][name] = {"time": time.time(), "value": _show(value, True), "counter": counter}
-        log.info("%s sent %s to %s", name, _show(value, True), _phones(len(phones)))
+        kind = {"kind": "indicate" if "indicate" in props else "notify"}
+        log.info("%s sent %s to %s", name, _show(value, True), _phones(len(phones)), extra=kind)
 
     def _stream(self, name):
         if name not in self.streams:
@@ -296,11 +376,11 @@ class Fixture:
                             "resubscribed": {},
                             "first_sent": {},
                         }
-                    log.info("Bluetooth %s, link dropped for %s", state, _phones(len(self.centrals)))
+                    log.info("Bluetooth %s, link dropped for %s", state, _phones(len(self.centrals)), extra=LINK)
                     self.published = False
                     self.centrals = {}
                 else:
-                    log.info("Bluetooth on")
+                    log.info("Bluetooth on", extra=LINK)
                     if was != "unknown":
                         if self.drop:
                             self.drop["on"] = time.time()
@@ -314,12 +394,12 @@ class Fixture:
             if now != self.centrals:
                 for central, names in now.items():
                     for name in sorted(names - self.centrals.get(central, set())):
-                        log.info("%s phone subscribed (%s…)", name, central[:8])
+                        log.info("%s phone subscribed (%s…)", name, central[:8], extra=SUBSCRIBE)
                         if self.drop and self.drop.get("on"):
                             self.drop["resubscribed"].setdefault(name, time.time())
                 for central, names in self.centrals.items():
                     for name in sorted(names - now.get(central, set())):
-                        log.info("%s phone unsubscribed (%s…)", name, central[:8])
+                        log.info("%s phone unsubscribed (%s…)", name, central[:8], extra=SUBSCRIBE)
                 self.centrals = now
                 self.changed()
             await asyncio.sleep(0.25)
@@ -343,6 +423,22 @@ def _show(value, as_counter=False):
         return f"{shown} (= {struct.unpack('<I', value)[0]})"
     text = _value_json(value)["text"]
     return f'{shown} "{text}"' if text else shown
+
+
+async def _power(on):
+    """Turns the Mac's Bluetooth radio off or on (blueutil). Off drops every phone's link."""
+    if not shutil.which("blueutil"):
+        raise ValueError("blueutil not found, run: brew install blueutil")
+    process = await asyncio.create_subprocess_exec("blueutil", "--power", "1" if on else "0")
+    if await process.wait() != 0:
+        raise ValueError("blueutil failed")
+
+
+def _number(value, name):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        raise ValueError(f"{name} must be a number") from None
 
 
 def _phones(n):
@@ -379,13 +475,15 @@ class PageLogHandler(logging.Handler):
     def __init__(self, fixture):
         super().__init__()
         self.fixture = fixture
-        self.recent = deque(maxlen=300)
+        self.recent = deque(maxlen=300)  # {"type": "log", "line", "kind"}
 
     def emit(self, record):
-        line = self.format(record)
-        self.recent.append(line)
-        if self.fixture.loop:
-            self.fixture.loop.call_soon_threadsafe(self.fixture._broadcast, {"type": "log", "line": line})
+        kind = getattr(record, "kind", "warn" if record.levelno >= logging.WARNING else "info")
+        event = {"type": "log", "line": self.format(record), "kind": kind}
+        self.recent.append(event)
+        loop = self.fixture.loop
+        if loop and not loop.is_closed():
+            loop.call_soon_threadsafe(self.fixture._broadcast, event)
 
 
 async def main(port):
@@ -404,7 +502,14 @@ async def main(port):
 
         tasks.append(serve(fixture, handler, port))
     log.info("Ctrl-C to stop")
-    await asyncio.gather(*tasks)
+    try:
+        await asyncio.gather(*tasks)
+    finally:
+        # Don't leave the Mac's Bluetooth off when stopped mid mock drop.
+        if fixture.mock.task:
+            fixture.mock.task.cancel()
+        if fixture.mock.bt_off:
+            subprocess.run(["blueutil", "--power", "1"], check=False)
 
 
 if __name__ == "__main__":

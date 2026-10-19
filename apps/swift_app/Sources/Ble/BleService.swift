@@ -63,6 +63,11 @@ actor BleService {
         try await device(remoteId).disconnect()
     }
 
+    /// Drops the cached handle, so the next session starts from a fresh one.
+    func forget(_ remoteId: String) {
+        devices.removeValue(forKey: remoteId)
+    }
+
     func connectionStates(_ remoteId: String) throws -> AsyncStream<BluetoothConnectionState> {
         let stream = try device(remoteId).connectionState()
         return bridge(stream.items()) { stream.close() }
