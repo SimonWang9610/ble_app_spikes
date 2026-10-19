@@ -1,0 +1,4 @@
+#include "Generated.xcconfig"
+
+// ble_poc_dart ships only arm64 simulator libs
+EXCLUDED_ARCHS[sdk=iphonesimulator*] = x86_64

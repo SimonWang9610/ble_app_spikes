@@ -1,0 +1,22 @@
+name: flutter_app
+description: "Checks the hm_ble Dart binding against the BLE fixture."
+publish_to: 'none'
+version: 0.1.0+1
+
+environment:
+  sdk: ^3.11.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+  ble_poc_dart:
+    path: ../../../../rust-interoperability-poc/.worktree/ble-poc-foundation/dist/dart/ble_poc_dart
+  flutter_bloc: ^9.1.1
+  bloc_concurrency: ^0.3.0
+  equatable: ^3.0.0
+
+dev_dependencies:
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
