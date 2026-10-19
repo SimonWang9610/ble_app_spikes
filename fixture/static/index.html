@@ -1,0 +1,335 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HM-BLE-FIXTURE</title>
+<style>
+  :root {
+    --bg: #f2f2f7; --card: #fff; --text: #1c1c1e; --muted: #6c6c70; --line: #e5e5ea; --soft: #f2f2f7;
+    --accent: #0a66d8; --ok: #248a3d; --bad: #d70015; --warn: #c93400; --chip: #e8f0fe; --chip-text: #1a56b8;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #000; --card: #1c1c1e; --text: #f2f2f7; --muted: #98989f; --line: #38383a; --soft: #2c2c2e;
+      --accent: #409cff; --ok: #30d158; --bad: #ff453a; --warn: #ff9f0a; --chip: #1f2c44; --chip-text: #9cc3ff;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.4 -apple-system, system-ui, sans-serif; padding-bottom: 64px; }
+  main { max-width: 760px; margin: 0 auto; padding: 16px; }
+  h1 { font-size: 22px; margin: 4px 0 12px; }
+  .card { background: var(--card); border-radius: 12px; overflow: hidden; margin-bottom: 18px; }
+  .section-title { font-size: 13px; color: var(--muted); margin: 0 4px 6px; display: flex; gap: 8px; align-items: baseline; }
+  .mono { font-family: ui-monospace, Menlo, monospace; font-size: 13px; }
+  .muted { color: var(--muted); }
+  .status { padding: 14px 16px; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+  .status .line { flex: 1; min-width: 240px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--bad); flex: none; }
+  .dot.on { background: var(--ok); }
+  button { font: inherit; padding: 6px 12px; border-radius: 8px; border: 0; background: var(--soft); color: var(--accent); cursor: pointer; }
+  button.primary { background: var(--accent); color: #fff; }
+  button.danger { color: var(--bad); }
+  input, select { font: inherit; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line); background: var(--card); color: var(--text); }
+  input.wide { flex: 1; min-width: 120px; }
+  input.num { width: 70px; }
+  details.drop { border-top: 1px solid var(--line); padding: 10px 16px; }
+  details.drop summary { cursor: pointer; }
+  details.drop table { border-collapse: collapse; margin-top: 8px; }
+  details.drop td { padding: 2px 12px 2px 0; vertical-align: top; }
+  .row { display: flex; gap: 12px; padding: 11px 16px; border-top: 1px solid var(--line); cursor: pointer; align-items: center; }
+  .row:first-child { border-top: 0; }
+  .row:hover { background: var(--soft); }
+  .row .main { flex: 1; min-width: 0; }
+  .row .name { font-weight: 600; display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+  .row .value { margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .row .chev { color: var(--muted); }
+  .chip { background: var(--chip); color: var(--chip-text); border-radius: 999px; padding: 0 7px; font-size: 12px; font-weight: 500; }
+  .badge { font-size: 13px; white-space: nowrap; }
+  .badge.live { color: var(--ok); }
+  .badge.paused { color: var(--warn); }
+  dialog { border: 0; border-radius: 14px; padding: 0; width: min(520px, calc(100vw - 32px)); background: var(--card); color: var(--text); }
+  dialog::backdrop { background: rgba(0, 0, 0, .35); }
+  .dlg-head { display: flex; align-items: center; padding: 14px 16px; border-bottom: 1px solid var(--line); }
+  .dlg-head h2 { margin: 0; font-size: 17px; flex: 1; }
+  .dlg-body { padding: 12px 16px 16px; }
+  .field { display: grid; grid-template-columns: 110px 1fr; gap: 4px 10px; margin: 8px 0; align-items: baseline; }
+  .field > :first-child { color: var(--muted); }
+  .actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 10px 0 2px; }
+  .hint { color: var(--muted); font-size: 13px; margin: 2px 0 0; }
+  .error { color: var(--bad); font-size: 13px; min-height: 1em; }
+  #log { position: fixed; left: 0; right: 0; bottom: 0; background: var(--card); border-top: 1px solid var(--line); }
+  #log .bar { display: flex; align-items: center; gap: 10px; padding: 8px 16px; cursor: pointer; }
+  #log .latest { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #log pre { display: none; margin: 0; padding: 4px 16px 10px; height: 220px; overflow: auto; white-space: pre-wrap; }
+  #log.open pre { display: block; }
+  body.log-open { padding-bottom: 300px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>HM-BLE-FIXTURE <span class="muted" style="font-weight:400">(this Mac)</span></h1>
+
+  <div class="card">
+    <div class="status">
+      <div class="line"><span class="dot" id="dot"></span><span id="status">Connecting to the fixture…</span></div>
+      <button id="bluetooth-btn" class="danger"></button>
+      <button id="advertising-btn"></button>
+    </div>
+    <details class="drop" id="drop" hidden>
+      <summary><strong>Last link drop:</strong> <span id="drop-summary"></span></summary>
+      <table class="mono" id="drop-events"></table>
+    </details>
+  </div>
+  <p class="hint" style="margin:-10px 4px 18px">Turning Bluetooth off drops every phone's link, like walking out of range,
+    and also disconnects this Mac's other Bluetooth devices. When it is back on, the fixture advertises again by itself;
+    the phone reconnects and subscribes again.</p>
+
+  <div id="services"></div>
+</main>
+
+<dialog id="dialog">
+  <div class="dlg-head"><h2 id="dlg-title"></h2><button id="dlg-close">Done</button></div>
+  <div class="dlg-body" id="dlg-body"></div>
+</dialog>
+
+<div id="log">
+  <div class="bar" id="log-bar">
+    <strong>Log</strong><span class="latest mono muted" id="log-latest"></span>
+    <button id="log-clear">Clear</button><span class="muted" id="log-arrow">▴</span>
+  </div>
+  <pre class="mono" id="log-lines"></pre>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let state = null;
+let openChar = null; // name of the characteristic whose dialog is open
+const rows = {};
+
+// ---------- helpers
+
+async function call(name, body = {}) {
+  const res = await fetch(`/api/${name}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const error = res.ok ? "" : (await res.json().catch(() => ({}))).error || res.statusText;
+  const slot = document.querySelector("#dlg-body .error");
+  if (slot) slot.textContent = error;
+  else if (error) alert(error);
+}
+
+const phones = (n) => (n === 1 ? "1 phone" : `${n} phones`);
+
+function counter(hex) {
+  const b = hex.split(" ").filter(Boolean).map((h) => parseInt(h, 16));
+  return b.length === 4 ? (b[0] | (b[1] << 8) | (b[2] << 16) | (b[3] << 24)) >>> 0 : null;
+}
+
+function showValue(hex, isStream) {
+  if (!hex) return "(empty)";
+  const n = isStream ? counter(hex) : null;
+  return n === null ? hex : `${hex} = ${n}`;
+}
+
+function findChar(name) {
+  for (const s of state.services) for (const c of s.characteristics) if (c.name === name) return [s, c];
+}
+
+// ---------- status and drop timeline
+
+function renderStatus(d, drop) {
+  const on = d.bluetooth === "on";
+  const subscribed = d.centrals.length;
+  $("dot").className = `dot${on ? " on" : ""}`;
+  $("status").textContent = [
+    `Bluetooth ${d.bluetooth}`,
+    d.advertising ? "Advertising" : "Not advertising",
+    subscribed ? `${phones(subscribed)} subscribed` : "no phone subscribed",
+  ].join(" · ");
+  $("bluetooth-btn").textContent = on ? "Turn Bluetooth off" : "Turn Bluetooth on";
+  $("bluetooth-btn").className = on ? "danger" : "primary";
+  $("advertising-btn").textContent = d.advertising ? "Stop advertising" : "Start advertising";
+  $("advertising-btn").disabled = !on;
+
+  $("drop").hidden = !drop;
+  if (drop) {
+    $("drop-summary").textContent = drop.summary;
+    $("drop-events").innerHTML = drop.events
+      .map((e) => `<tr><td>${e.time}</td><td>${e.what}</td><td class="muted">${e.detail}</td></tr>`)
+      .join("");
+  }
+}
+
+// ---------- characteristic rows (same layout as the app)
+
+function rowText(c) {
+  const stream = !!c.stream;
+  let value;
+  if (c.stored) value = `${c.stored.hex || "(empty)"}${c.stored.text ? `  "${c.stored.text}"` : ""}`;
+  else value = c.last && c.last.op === "sent" ? showValue(c.last.value, true) : "–";
+  if (c.last) value += ` · ${c.last.op} ${c.last.time}`;
+
+  let badge = "", cls = "badge";
+  if (stream) {
+    if (!c.subscribers.length) badge = c.stream.paused ? "paused · no phone subscribed" : "no phone subscribed";
+    else if (c.stream.paused) { badge = `◉ paused · ${phones(c.subscribers.length)}`; cls += " paused"; }
+    else { badge = `◉ sending to ${phones(c.subscribers.length)} · ${c.stream.sent}`; cls += " live"; }
+    if (!c.subscribers.length) cls += " muted";
+  }
+  return { value, badge, cls };
+}
+
+function buildServices(services) {
+  const root = $("services");
+  for (const s of services) {
+    root.insertAdjacentHTML("beforeend",
+      `<div class="section-title">${s.name} <span class="mono">${s.uuid}</span></div><div class="card" data-service="${s.name}"></div>`);
+    const card = root.lastElementChild;
+    for (const c of s.characteristics) {
+      card.insertAdjacentHTML("beforeend", `<div class="row">
+        <div class="main">
+          <div class="name">${c.name} ${c.properties.map((p) => `<span class="chip">${p}</span>`).join("")}</div>
+          <div class="value mono muted"></div>
+        </div>
+        <span class="badge"></span><span class="chev">›</span>
+      </div>`);
+      const row = card.lastElementChild;
+      row.onclick = () => openDialog(c.name);
+      rows[c.name] = { value: row.querySelector(".value"), badge: row.querySelector(".badge") };
+    }
+  }
+}
+
+function renderRows(services) {
+  for (const s of services) {
+    for (const c of s.characteristics) {
+      const t = rowText(c);
+      rows[c.name].value.textContent = t.value;
+      rows[c.name].badge.textContent = t.badge;
+      rows[c.name].badge.className = t.cls;
+    }
+  }
+}
+
+// ---------- dialog (same actions the app offers, seen from the fixture)
+
+function valueInput() {
+  return `<select data-format><option value="hex">hex</option><option value="utf8">text</option></select>
+          <input class="wide mono" data-input placeholder="01 02 0a">`;
+}
+
+function readInput(root) {
+  return { text: root.querySelector("[data-input]").value, format: root.querySelector("[data-format]").value };
+}
+
+function openDialog(name) {
+  const [service, c] = findChar(name);
+  openChar = name;
+  $("dlg-title").textContent = c.name;
+  const body = $("dlg-body");
+  body.innerHTML = `<div class="mono muted">${c.uuid} · ${service.name} · ${c.properties.join(" ")}</div>`;
+
+  if (c.stored) {
+    const writable = c.properties.some((p) => p.startsWith("write"));
+    body.insertAdjacentHTML("beforeend", `
+      <div class="field"><span>Phones read</span><span class="mono" data-show="stored"></span></div>
+      <div class="field"><span>Last</span><span data-show="last"></span></div>
+      <div class="hint">${writable ? "A phone's write replaces this value." : "Phones can only read this."}</div>
+      <div class="actions">${valueInput()}<button class="primary" data-act="set">Set</button></div>
+      <div class="hint">Set sends nothing; the phone gets it on its next read.</div>`);
+    body.querySelector("[data-act=set]").onclick = () => call("stored", { char: name, ...readInput(body) });
+  }
+
+  if (c.stream) {
+    const kind = c.properties.includes("indicate") ? "indications" : "notifications";
+    body.insertAdjacentHTML("beforeend", `
+      <div class="field"><span>Subscribed</span><span data-show="subs"></span></div>
+      <div class="field"><span>Sending</span><span class="actions" style="margin:0">
+        every <input class="num" type="number" min="0.05" step="0.1" data-interval> s
+        <button data-act="interval">Apply</button><button data-act="pause"></button></span></div>
+      <div class="field"><span>Counter</span><span class="actions" style="margin:0">
+        <strong class="mono" data-show="counter"></strong><button data-act="reset">Reset</button></span></div>
+      <div class="field"><span>Last</span><span class="mono" data-show="last"></span></div>
+      <div class="actions"><button class="primary" data-act="next">Send next counter now</button></div>
+      <div class="actions">${valueInput()}<button data-act="send">Send bytes</button></div>
+      <div class="hint">Sent as ${kind} (u32 little-endian counter), only to subscribed phones.</div>`);
+    const interval = body.querySelector("[data-interval]");
+    interval.value = c.stream.interval;
+    body.querySelector("[data-act=interval]").onclick = () => call("stream", { char: name, interval: Number(interval.value) });
+    body.querySelector("[data-act=pause]").onclick = () => call("stream", { char: name, paused: !findChar(name)[1].stream.paused });
+    body.querySelector("[data-act=reset]").onclick = () => call("reset", { char: name });
+    body.querySelector("[data-act=next]").onclick = () => call("send", { char: name });
+    body.querySelector("[data-act=send]").onclick = () => call("send", { char: name, ...readInput(body) });
+  }
+
+  body.insertAdjacentHTML("beforeend", `<div class="error"></div>`);
+  renderDialog();
+  $("dialog").showModal();
+}
+
+function renderDialog() {
+  if (!openChar) return;
+  const [, c] = findChar(openChar);
+  const body = $("dlg-body");
+  const set = (key, text) => { const el = body.querySelector(`[data-show=${key}]`); if (el) el.textContent = text; };
+  if (c.stored) set("stored", `${c.stored.hex || "(empty)"}${c.stored.text ? `  "${c.stored.text}"` : ""}`);
+  if (c.stream) {
+    set("subs", c.subscribers.length ? `${phones(c.subscribers.length)} (${c.subscribers.map((p) => p.slice(0, 8) + "…").join(", ")})` : "no phone");
+    set("counter", c.stream.counter);
+    body.querySelector("[data-act=pause]").textContent = c.stream.paused ? "Resume" : "Pause";
+  }
+  set("last", c.last ? `${c.last.op} ${showValue(c.last.value, !!c.stream)} at ${c.last.time}` : "nothing yet");
+}
+
+$("dlg-close").onclick = () => $("dialog").close();
+$("dialog").addEventListener("close", () => (openChar = null));
+
+// ---------- log (collapsed to the latest line, like the app)
+
+function appendLog(line) {
+  const pre = $("log-lines");
+  const atBottom = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 4;
+  pre.textContent += line + "\n";
+  $("log-latest").textContent = line;
+  if (atBottom) pre.scrollTop = pre.scrollHeight;
+}
+
+$("log-bar").onclick = (e) => {
+  if (e.target.id === "log-clear") return;
+  $("log").classList.toggle("open");
+  document.body.classList.toggle("log-open");
+  $("log-arrow").textContent = $("log").classList.contains("open") ? "▾" : "▴";
+  $("log-lines").scrollTop = $("log-lines").scrollHeight;
+};
+$("log-clear").onclick = () => { $("log-lines").textContent = ""; $("log-latest").textContent = ""; };
+
+// ---------- wiring
+
+$("bluetooth-btn").onclick = () => call("bluetooth", { on: state.device.bluetooth !== "on" });
+$("advertising-btn").onclick = () => call("advertising", { on: !state.device.advertising });
+
+function render(s) {
+  const first = !state;
+  if (first) buildServices(s.services);
+  state = s;
+  // #NOTIFY in the URL opens that characteristic's dialog.
+  if (first && location.hash && findChar(location.hash.slice(1))) openDialog(location.hash.slice(1));
+  renderStatus(s.device, s.drop);
+  renderRows(s.services);
+  renderDialog();
+}
+
+const events = new EventSource("/events");
+events.onopen = () => { $("log-lines").textContent = ""; };
+events.onerror = () => { $("dot").className = "dot"; $("status").textContent = "Fixture not running"; };
+events.onmessage = (e) => {
+  const event = JSON.parse(e.data);
+  if (event.type === "state") render(event.state);
+  else appendLog(event.line);
+};
+</script>
+</body>
+</html>
