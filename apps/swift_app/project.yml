@@ -5,7 +5,7 @@ options:
     iOS: "17.0"
 packages:
   BlePocSwift:
-    path: ../../../../rust-interoperability-poc/.worktree/ble-poc-foundation/dist/swift/BlePocSwift
+    path: ../../../../projects/rust-interoperability-poc/.worktree/ble-poc-foundation/dist/swift/BlePocSwift
 settings:
   base:
     SWIFT_VERSION: "6.0"

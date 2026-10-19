@@ -20,7 +20,7 @@ packages:
   ble_poc_dart:
     dependency: "direct main"
     description:
-      path: "../../../../rust-interoperability-poc/.worktree/ble-poc-foundation/dist/dart/ble_poc_dart"
+      path: "../../../../projects/rust-interoperability-poc/.worktree/ble-poc-foundation/dist/dart/ble_poc_dart"
       relative: true
     source: path
     version: "0.0.0"
