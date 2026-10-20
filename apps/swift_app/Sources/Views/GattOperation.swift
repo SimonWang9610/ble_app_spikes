@@ -26,6 +26,7 @@ enum GattOperation: CaseIterable {
     }
 
     var isSubscription: Bool { self == .notify || self == .indicate }
+    var isWrite: Bool { self == .write || self == .writeWithoutResponse }
 
     func isSupported(by properties: CharacteristicProperties) -> Bool {
         switch self {
@@ -40,14 +41,14 @@ enum GattOperation: CaseIterable {
 
 /// A (characteristic, operation) pair: one row in the device screen and the dialog it opens.
 struct OperationRow: Identifiable {
-    let state: CharacteristicState
+    let characteristic: Characteristic
     let operation: GattOperation
     let id: String
 
-    @MainActor init(state: CharacteristicState, operation: GattOperation) {
-        self.state = state
+    @MainActor init(characteristic: Characteristic, operation: GattOperation) {
+        self.characteristic = characteristic
         self.operation = operation
-        id = "\(state.ref.service)/\(state.ref.characteristic)/\(operation)"
+        id = "\(characteristic.ref.service)/\(characteristic.ref.characteristic)/\(operation)"
     }
 }
 
@@ -55,10 +56,10 @@ struct OperationRow: Identifiable {
 extension ServiceGroup {
     /// Characteristics in discovery order, then operations read → write → write without response → notify → indicate.
     var rows: [OperationRow] {
-        characteristics.flatMap { state in
+        characteristics.flatMap { characteristic in
             GattOperation.allCases
-                .filter { $0.isSupported(by: state.properties) }
-                .map { OperationRow(state: state, operation: $0) }
+                .filter { $0.isSupported(by: characteristic.properties) }
+                .map { OperationRow(characteristic: characteristic, operation: $0) }
         }
     }
 }

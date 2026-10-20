@@ -6,24 +6,22 @@ import Observation
 final class SessionStore {
     private(set) var current: DeviceSession?
 
-    private let service: BleService
-    private let log: DeviceLog
+    private let ble: any DeviceLink & GattIO
 
-    init(service: BleService, log: DeviceLog) {
-        self.service = service
-        self.log = log
+    init(ble: any DeviceLink & GattIO) {
+        self.ble = ble
     }
 
     /// Returns the session for this device, connecting a new one if needed.
     func open(remoteId: String, name: String) -> DeviceSession {
         if let current, current.remoteId == remoteId {
-            if case .disconnected = current.status { Task { await current.connect() } }
+            if case .disconnected = current.connection.status { Task { await current.connect() } }
             return current
         }
         if let old = current {
             Task { await old.disconnect() }
         }
-        let session = DeviceSession(remoteId: remoteId, name: name, service: service, log: log)
+        let session = DeviceSession(remoteId: remoteId, name: name, ble: ble)
         current = session
         Task { await session.connect() }
         return session

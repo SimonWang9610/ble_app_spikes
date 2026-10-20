@@ -9,26 +9,24 @@ final class AdapterModel {
     private(set) var isInitialized = false
     private(set) var error: String?
 
-    private let service: BleService
-    private let log: DeviceLog
+    private let adapter: any BleAdapter
 
-    init(service: BleService, log: DeviceLog) {
-        self.service = service
-        self.log = log
+    init(adapter: any BleAdapter) {
+        self.adapter = adapter
     }
 
     /// Runs for the app's lifetime, from the root view's `.task`.
     func observe() async {
         do {
-            try await log.api("initialize(defaultTimeout: 15)") { try await service.initialize(defaultTimeout: 15) }
+            try await Log.api("initialize(defaultTimeout: 15)") { try await adapter.initialize(defaultTimeout: 15) }
             isInitialized = true
-            for await state in try await service.adapterStates() {
+            for await state in try await adapter.adapterStates() {
                 self.state = state
-                log.event(state == .poweredOn ? "Bluetooth on" : "Bluetooth \(state)")
+                Log.event(state == .poweredOn ? "Bluetooth on" : "Bluetooth \(state)")
             }
         } catch {
             self.error = describe(error)
-            log.error("Bluetooth unavailable: \(describe(error))")
+            Log.error("Bluetooth unavailable: \(describe(error))")
         }
     }
 }

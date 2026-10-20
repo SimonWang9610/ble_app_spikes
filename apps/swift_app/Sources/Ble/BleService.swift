@@ -11,17 +11,12 @@ extension BleManagerScanResultsStream: @retroactive @unchecked Sendable {}
 extension BluetoothDeviceConnectionStateStream: @retroactive @unchecked Sendable {}
 extension BluetoothCharacteristicOnValueReceivedStream: @retroactive @unchecked Sendable {}
 
-struct CharacteristicRef: Hashable, Sendable {
-    let remoteId: String
-    let service: String
-    let characteristic: String
-}
-
-/// The only code that touches the binding. Models call it; it holds no UI state.
+/// The only code that touches the binding. Models reach it through `BleAdapter`, `DeviceLink`
+/// and `GattIO`; it holds no UI state.
 ///
 /// An actor so the device cache is safe to use from any task. While a call awaits the binding,
 /// the actor is free for other calls (actors are re-entrant), so a slow `connect` blocks nothing.
-actor BleService {
+actor BleService: BleAdapter, DeviceLink, GattIO {
     private let manager = BleManager()
     // Handles share the core's state; keeping one per device keeps the core from forgetting it.
     private var devices: [String: BluetoothDevice] = [:]
@@ -63,7 +58,6 @@ actor BleService {
         try await device(remoteId).disconnect()
     }
 
-    /// Drops the cached handle, so the next session starts from a fresh one.
     func forget(_ remoteId: String) {
         devices.removeValue(forKey: remoteId)
     }
@@ -123,24 +117,6 @@ actor BleService {
 
     private func characteristic(_ ref: CharacteristicRef) throws -> BluetoothCharacteristic {
         try device(ref.remoteId).characteristic(serviceUuid: ref.service, characteristicUuid: ref.characteristic)
-    }
-}
-
-/// Re-wraps a binding stream so the binding object stays alive while it is consumed,
-/// and is closed when the consumer stops (its task is cancelled or the loop ends).
-private func bridge<T: Sendable>(
-    _ items: AsyncStream<T>,
-    close: @escaping @Sendable () -> Void
-) -> AsyncStream<T> {
-    AsyncStream { continuation in
-        let task = Task {
-            for await item in items { continuation.yield(item) }
-            continuation.finish()
-        }
-        continuation.onTermination = { _ in
-            task.cancel()
-            close()
-        }
     }
 }
 

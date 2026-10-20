@@ -1,108 +1,88 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../bytes.dart';
 import '../fixture.dart';
-import '../session/session_bloc.dart';
-import '../session/session_state.dart';
+import '../session/characteristic.dart';
+import '../session/connection.dart';
+import '../session/subscriptions.dart';
 import 'operation.dart';
+import 'write_form.dart';
 
-Future<void> showOperationSheet(BuildContext context, String key, Operation operation) {
+/// Sized to its content, up to 90% of the screen, so the controls fit without scrolling.
+Future<void> showOperationSheet(BuildContext context, CharKey key, Operation operation) {
   return showModalBottomSheet<void>(
     context: context,
     isScrollControlled: true,
+    useSafeArea: true,
     showDragHandle: true,
+    constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(context).height * 0.9),
     builder: (_) => OperationSheet(charKey: key, operation: operation),
   );
 }
 
 /// The dialog for one operation of one characteristic.
-/// The write form (text, format) is UI state, so it stays in this widget.
-class OperationSheet extends StatefulWidget {
+class OperationSheet extends ConsumerWidget {
   const OperationSheet({super.key, required this.charKey, required this.operation});
 
-  final String charKey;
-  final Operation operation;
-
-  @override
-  State<OperationSheet> createState() => _OperationSheetState();
-}
-
-class _OperationSheetState extends State<OperationSheet> {
   static const _mono = TextStyle(fontFamily: 'Menlo');
   static const _muted = TextStyle(fontSize: 12, color: Colors.grey);
 
-  final _input = TextEditingController();
-  ValueFormat _format = ValueFormat.hex;
-  String? _inputError;
+  final CharKey charKey;
+  final Operation operation;
 
   @override
-  void dispose() {
-    _input.dispose();
-    super.dispose();
-  }
+  Widget build(BuildContext context, WidgetRef ref) {
+    final connected = ref.watch(connectionProvider.select((c) => c.isConnected));
+    final c = ref.watch(characteristicProvider(charKey));
+    final enabled = connected && c.busy == null;
+    final name = Fixture.nameOf(charKey.ref.characteristic);
+    final isWrite = operation == Operation.write || operation == Operation.writeWithoutResponse;
 
-  void _write() {
-    try {
-      final value = parseValue(_input.text, _format);
-      setState(() => _inputError = null);
-      context.read<SessionBloc>().add(
-        WriteRequested(widget.charKey, value, withoutResponse: widget.operation == Operation.writeWithoutResponse),
-      );
-    } on FormatException catch (e) {
-      setState(() => _inputError = e.message);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final connected = context.select<SessionBloc, bool>((b) => b.state.isConnected);
-    return BlocSelector<SessionBloc, SessionState, CharState?>(
-      selector: (s) => s.chars[widget.charKey],
-      builder: (context, c) {
-        if (c == null) return const SizedBox(height: 120, child: Center(child: Text('Not connected')));
-        final enabled = connected && c.busy == null;
-        final name = Fixture.nameOf(c.ref.characteristic);
-
-        return Padding(
-          padding: EdgeInsets.fromLTRB(20, 0, 20, 20 + MediaQuery.of(context).viewInsets.bottom),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
+    // Scrolls only if the keyboard leaves too little room.
+    return SingleChildScrollView(
+      padding: EdgeInsets.fromLTRB(20, 0, 20, 20 + MediaQuery.viewInsetsOf(context).bottom),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Wrap(
+            spacing: 8,
+            crossAxisAlignment: WrapCrossAlignment.center,
             children: [
-              Wrap(
-                spacing: 8,
-                crossAxisAlignment: WrapCrossAlignment.center,
-                children: [
-                  if (name != null) Text(name, style: Theme.of(context).textTheme.titleLarge),
-                  OperationChip(widget.operation),
-                ],
-              ),
-              const SizedBox(height: 4),
-              Text(
-                '${c.ref.characteristic}\n${Fixture.label(c.ref.service)}',
-                style: _mono.copyWith(fontSize: 12, color: Colors.grey),
-              ),
-              const SizedBox(height: 16),
-              ...switch (widget.operation) {
-                Operation.read => _read(c, enabled),
-                Operation.write || Operation.writeWithoutResponse => _writeForm(enabled),
-                Operation.notify || Operation.indicate => _subscription(c, enabled),
-              },
-              if (c.busy != null) Padding(padding: const EdgeInsets.only(top: 8), child: Text(c.busy!)),
-              if (c.error != null)
-                Padding(
-                  padding: const EdgeInsets.only(top: 8),
-                  child: SelectableText(c.error!, style: const TextStyle(color: Colors.red)),
-                ),
+              if (name != null) Text(name, style: Theme.of(context).textTheme.titleLarge),
+              OperationChip(operation),
             ],
           ),
-        );
-      },
+          const SizedBox(height: 4),
+          Text(
+            '${charKey.ref.characteristic}\n${Fixture.label(charKey.ref.service)}',
+            style: _mono.copyWith(fontSize: 12, color: Colors.grey),
+          ),
+          const SizedBox(height: 16),
+          ...switch (operation) {
+            Operation.read => _read(context, ref, c, enabled),
+            Operation.write || Operation.writeWithoutResponse => [
+              WriteForm(
+                charKey: charKey,
+                withoutResponse: operation == Operation.writeWithoutResponse,
+                enabled: enabled,
+              ),
+            ],
+            Operation.notify || Operation.indicate => _subscription(context, ref, c, enabled),
+          },
+          if (c.busy != null) Padding(padding: const EdgeInsets.only(top: 8), child: Text(c.busy!)),
+          // A write shows its own error under the Write button.
+          if (c.error != null && !isWrite)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: SelectableText(c.error!, style: const TextStyle(color: Colors.red)),
+            ),
+        ],
+      ),
     );
   }
 
-  List<Widget> _read(CharState c, bool enabled) => [
+  List<Widget> _read(BuildContext context, WidgetRef ref, CharState c, bool enabled) => [
     Text('Latest', style: Theme.of(context).textTheme.labelLarge),
     if (c.latest == null)
       const Text('No value yet', style: TextStyle(color: Colors.grey))
@@ -112,42 +92,13 @@ class _OperationSheetState extends State<OperationSheet> {
     ],
     const SizedBox(height: 12),
     FilledButton.tonal(
-      onPressed: enabled ? () => context.read<SessionBloc>().add(ReadRequested(widget.charKey)) : null,
+      onPressed: enabled ? ref.read(characteristicProvider(charKey).notifier).read : null,
       child: const Text('Read'),
     ),
   ];
 
-  List<Widget> _writeForm(bool enabled) => [
-    Row(
-      children: [
-        SegmentedButton<ValueFormat>(
-          segments: const [
-            ButtonSegment(value: ValueFormat.hex, label: Text('hex')),
-            ButtonSegment(value: ValueFormat.utf8, label: Text('text')),
-          ],
-          selected: {_format},
-          onSelectionChanged: (s) => setState(() => _format = s.single),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: TextField(
-            controller: _input,
-            autocorrect: false,
-            style: _mono,
-            decoration: InputDecoration(
-              hintText: _format == ValueFormat.hex ? '01 02 0a' : 'text',
-              errorText: _inputError,
-            ),
-          ),
-        ),
-      ],
-    ),
-    const SizedBox(height: 12),
-    FilledButton.tonal(onPressed: enabled ? _write : null, child: const Text('Write')),
-  ];
-
-  List<Widget> _subscription(CharState c, bool enabled) {
-    final bloc = context.read<SessionBloc>();
+  List<Widget> _subscription(BuildContext context, WidgetRef ref, CharState c, bool enabled) {
+    final subscriptions = ref.read(subscriptionsProvider.notifier);
     final received = c.source == ValueSource.received ? c.latest : null;
     return [
       Row(
@@ -172,11 +123,11 @@ class _OperationSheetState extends State<OperationSheet> {
       const SizedBox(height: 12),
       c.subscribed
           ? OutlinedButton(
-              onPressed: enabled ? () => bloc.add(SubscribeRequested(widget.charKey, on: false)) : null,
+              onPressed: enabled ? () => subscriptions.set(charKey, false) : null,
               child: const Text('Unsubscribe'),
             )
           : FilledButton(
-              onPressed: enabled ? () => bloc.add(SubscribeRequested(widget.charKey, on: true)) : null,
+              onPressed: enabled ? () => subscriptions.set(charKey, true) : null,
               child: const Text('Subscribe'),
             ),
       const Text('Stays on when you leave the device; ends on Unsubscribe or Disconnect.', style: _muted),

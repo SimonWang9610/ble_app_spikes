@@ -1,88 +1,84 @@
 import 'package:ble_poc_dart/ble_poc_dart.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../adapter/adapter_cubit.dart';
-import '../nearby/nearby_bloc.dart';
-import '../session/session_bloc.dart';
-import '../session/session_state.dart';
+import '../adapter/adapter.dart';
+import '../nearby/nearby.dart';
+import '../session/connection.dart';
+import '../session/device_session.dart';
 import 'device_screen.dart';
 
-class NearbyScreen extends StatefulWidget {
+class NearbyScreen extends ConsumerStatefulWidget {
   const NearbyScreen({super.key});
 
   @override
-  State<NearbyScreen> createState() => _NearbyScreenState();
+  ConsumerState<NearbyScreen> createState() => _NearbyScreenState();
 }
 
-class _NearbyScreenState extends State<NearbyScreen> {
+class _NearbyScreenState extends ConsumerState<NearbyScreen> {
   @override
   void initState() {
     super.initState();
-    if (context.read<AdapterCubit>().state.initialized) _scan(true);
+    // Outside this build: providers can't change while the tree is building.
+    Future.microtask(() {
+      if (mounted && ref.read(adapterProvider).initialized) _scan(true);
+    });
   }
 
-  void _scan(bool active) => context.read<NearbyBloc>().add(NearbyScanSet(active));
+  void _scan(bool active) => ref.read(nearbyProvider.notifier).setScanning(active);
 
   /// Scanning pauses while the Device screen is on top and resumes when it is popped.
   Future<void> _openDevice(String remoteId, String name) async {
-    context.read<SessionBloc>().add(SessionOpened(remoteId, name));
+    ref.read(deviceSessionProvider.notifier).open(remoteId, name);
     _scan(false);
     await Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const DeviceScreen()));
-    if (mounted && context.read<AdapterCubit>().state.initialized) _scan(true);
+    if (mounted && ref.read(adapterProvider).initialized) _scan(true);
   }
 
   @override
   Widget build(BuildContext context) {
-    return BlocListener<AdapterCubit, AdapterState>(
-      // Start scanning once the manager is ready.
-      listenWhen: (a, b) => !a.initialized && b.initialized,
-      listener: (context, _) => _scan(true),
-      child: Scaffold(
-        appBar: AppBar(title: const Text('Nearby')),
-        body: ListView(
-          children: [
-            const _BluetoothBanner(),
-            _ConnectedSection(onOpen: _openDevice),
-            BlocBuilder<NearbyBloc, NearbyState>(
-              builder: (context, nearby) => Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  _Header('Nearby', trailing: nearby.scanning ? const _Spinner() : null),
-                  SwitchListTile(
-                    title: const Text('Only HM-BLE fixtures'),
-                    value: nearby.onlyFixtures,
-                    onChanged: (on) => context.read<NearbyBloc>().add(NearbyFilterChanged(on)),
-                  ),
-                  for (final result in nearby.results)
-                    _DeviceTile(
-                      name: result.advertisementData.advName,
-                      detail: result.remoteId,
-                      trailing: '${result.rssi} dBm',
-                      onTap: () => _openDevice(result.remoteId, result.advertisementData.advName),
-                    ),
-                  if (nearby.error != null)
-                    ListTile(
-                      title: Text(nearby.error!, style: const TextStyle(color: Colors.red)),
-                    )
-                  else if (nearby.results.isEmpty && nearby.scanning)
-                    const ListTile(title: Text('Looking for devices…')),
-                ],
-              ),
+    // Start scanning once the manager is ready.
+    ref.listen(adapterProvider.select((a) => a.initialized), (was, now) {
+      if (was != true && now) _scan(true);
+    });
+    final nearby = ref.watch(nearbyProvider);
+    return Scaffold(
+      appBar: AppBar(title: const Text('Nearby')),
+      body: ListView(
+        children: [
+          const _BluetoothBanner(),
+          _ConnectedSection(onOpen: _openDevice),
+          _Header('Nearby', trailing: nearby.scanning ? const _Spinner() : null),
+          SwitchListTile(
+            title: const Text('Only HM-BLE fixtures'),
+            value: nearby.onlyFixtures,
+            onChanged: ref.read(nearbyProvider.notifier).setOnlyFixtures,
+          ),
+          for (final result in nearby.results)
+            _DeviceTile(
+              name: result.advertisementData.advName,
+              detail: result.remoteId,
+              trailing: '${result.rssi} dBm',
+              onTap: () => _openDevice(result.remoteId, result.advertisementData.advName),
             ),
-          ],
-        ),
+          if (nearby.error != null)
+            ListTile(
+              title: Text(nearby.error!, style: const TextStyle(color: Colors.red)),
+            )
+          else if (nearby.results.isEmpty && nearby.scanning)
+            const ListTile(title: Text('Looking for devices…')),
+        ],
       ),
     );
   }
 }
 
-class _BluetoothBanner extends StatelessWidget {
+class _BluetoothBanner extends ConsumerWidget {
   const _BluetoothBanner();
 
   @override
-  Widget build(BuildContext context) {
-    final adapter = context.watch<AdapterCubit>().state;
+  Widget build(BuildContext context, WidgetRef ref) {
+    final adapter = ref.watch(adapterProvider);
     final String? text;
     if (adapter.error != null) {
       text = 'Bluetooth unavailable: ${adapter.error}';
@@ -99,17 +95,15 @@ class _BluetoothBanner extends StatelessWidget {
   }
 }
 
-class _ConnectedSection extends StatelessWidget {
+class _ConnectedSection extends ConsumerWidget {
   const _ConnectedSection({required this.onOpen});
 
   final void Function(String remoteId, String name) onOpen;
 
   @override
-  Widget build(BuildContext context) {
-    // Rebuilds only when the connected device or its status changes, not on every value.
-    final (remoteId, name, status) = context.select<SessionBloc, (String?, String, ConnectionStatus)>(
-      (b) => (b.state.remoteId, b.state.name, b.state.status),
-    );
+  Widget build(BuildContext context, WidgetRef ref) {
+    // Rebuilds only when the connected device or its status changes, not on RSSI or MTU.
+    final (remoteId, name, status) = ref.watch(connectionProvider.select((c) => (c.remoteId, c.name, c.status)));
     if (remoteId == null) return const SizedBox.shrink();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,

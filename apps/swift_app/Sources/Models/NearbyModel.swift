@@ -11,14 +11,12 @@ final class NearbyModel {
     private(set) var isScanning = false
     private(set) var error: String?
 
-    private let service: BleService
-    private let log: DeviceLog
+    private let adapter: any BleAdapter
     // Which scan is current; a cancelled scan must not stop the one that replaced it.
     @ObservationIgnored private var generation = 0
 
-    init(service: BleService, log: DeviceLog) {
-        self.service = service
-        self.log = log
+    init(adapter: any BleAdapter) {
+        self.adapter = adapter
     }
 
     /// Scans until the calling task is cancelled (the screen went away or the filter changed).
@@ -29,23 +27,23 @@ final class NearbyModel {
         results = []
         error = nil
         do {
-            let stream = try await service.scanResults()
-            try await log.api("startScan(withNames: \(names))") { try await service.startScan(names: names) }
+            let stream = try await adapter.scanResults()
+            try await Log.api("startScan(withNames: \(names))") { try await adapter.startScan(names: names) }
             isScanning = true
             for await list in stream {
                 results = list.sorted { $0.rssi > $1.rssi }
             }
         } catch {
             self.error = describe(error)
-            log.error("Scan failed: \(describe(error))")
+            Log.error("Scan failed: \(describe(error))")
         }
         guard mine == generation else { return }
         isScanning = false
         // This task is being cancelled, so stop the scan from a task of its own,
         // unless a new scan has started by then.
-        Task { [service] in
+        Task { [adapter] in
             guard mine == generation else { return }
-            try? await service.stopScan()
+            try? await adapter.stopScan()
         }
     }
 }

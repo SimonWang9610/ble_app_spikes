@@ -1,3 +1,5 @@
+import BlePocSwift
+
 /// The fixture's name and UUIDs (docs/test-plan.md), used for the default scan filter and labels.
 enum Fixture {
     static let name = "HM-BLE-FIXTURE"
@@ -9,6 +11,12 @@ enum Fixture {
         "f0e10101-5a3e-4c1a-9d2b-1b2c3d4e5f60": "NOTIFY",
         "f0e10102-5a3e-4c1a-9d2b-1b2c3d4e5f60": "INDICATE",
     ]
+
+    /// Only the fixture's services when the device has any (a Mac also exposes its own), else all.
+    static func services(of services: [BluetoothService]) -> [BluetoothService] {
+        let own = services.filter { labels[$0.serviceUuid] != nil }
+        return own.isEmpty ? services : own
+    }
 
     /// "VALUE" for fixture UUIDs, nil otherwise.
     static func knownName(_ uuid: String) -> String? {

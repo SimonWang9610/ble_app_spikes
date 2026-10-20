@@ -69,12 +69,15 @@ truth; run `xcodegen generate` again after changing it or adding files.
 
 | File | Role |
 |---|---|
-| `Ble/BleService.swift` | actor, the only code that touches the binding |
+| `Ble/Interfaces.swift`, `BleService.swift` | `BleAdapter` / `DeviceLink` / `GattIO`; the actor that implements them, the only code that touches the binding |
 | `Models/AdapterModel.swift`, `NearbyModel.swift` | Bluetooth state; scanning while Nearby is visible |
-| `Models/DeviceSession.swift` | the connected device: connection, auto-reconnect, subscriptions, one `CharacteristicState` per characteristic |
+| `Models/Session/DeviceSession.swift` | the connected device: orders the parts below on connect, reconnect and disconnect |
+| `Models/Session/Connection.swift`, `Reconnector.swift` | the link and its status; the retry loop after a link loss |
+| `Models/Session/Gatt.swift`, `Characteristic.swift` | discovered services as tiles; one model per characteristic |
+| `Models/Session/Subscriptions.swift`, `Run.swift` | notify / indicate streams; `Run.wrapAsync` stops work left over from a Disconnect |
 | `Models/SessionStore.swift` | holds the current session (outlives the Device screen) |
-| `Models/DeviceLog.swift` | device events in plain words; API calls behind a switch |
-| `Views/` | `NearbyView`, `DeviceView`, `CharacteristicSheet`, `LogPanel` |
+| `Models/Log.swift` | `Log` singleton: device events in plain words; API calls behind a switch |
+| `Views/` | `NearbyView`, `DeviceView`, `CharacteristicSheet` (one operation), `LogPanel` |
 
 Creating the project in the Xcode GUI instead: File → New → Project → iOS App (SwiftUI); File → Add
 Package Dependencies → Add Local… → `dist/swift/BlePocSwift`; General → Frameworks → add
@@ -85,20 +88,23 @@ Package Dependencies → Add Local… → `dist/swift/BlePocSwift`; General → 
 ```sh
 cd apps/flutter_app
 open ios/Runner.xcworkspace   # once: Runner → Signing & Capabilities → your team
+dart run build_runner build   # after changing a provider (the generated *.g.dart files are committed)
 flutter run                   # with the device connected
 ```
 
 | Folder | Role |
 |---|---|
-| `lib/src/ble/ble_service.dart` | the only code that touches the binding (repository) |
-| `lib/src/log/` | `DeviceLog` repository blocs write to; `LogCubit` for the panel |
-| `lib/src/adapter/` | `AdapterCubit`: initialize, Bluetooth state |
-| `lib/src/nearby/` | `NearbyBloc`: scan while visible (`restartable`), filter |
-| `lib/src/session/` | `SessionBloc`: connection, auto-reconnect, subscriptions; immutable `SessionState` / `CharState` |
-| `lib/src/ui/` | `NearbyScreen`, `DeviceScreen`, `CharacteristicSheet`, `LogPanel` |
+| `lib/src/ble/` | `BleAdapter` / `DeviceLink` / `GattIO` and the `BleService` that implements them (the only code that touches the binding) |
+| `lib/src/log/` | `Log` singleton (`Log.event`, `Log.api`, …) and the panel's `logEntriesProvider` |
+| `lib/src/adapter/` | initialize, Bluetooth state |
+| `lib/src/nearby/` | scan while Nearby is visible, filter |
+| `lib/src/session/` | `DeviceSession` coordinator and its parts: current device, connection, reconnector, gatt, characteristic, subscriptions |
+| `lib/src/ui/` | `NearbyScreen`, `DeviceScreen`, `OperationSheet`, `LogPanel` |
 
-State uses `flutter_bloc`: repositories via `RepositoryProvider`, app-wide blocs in `main.dart`,
-`NearbyBloc` owned by its screen. Rows use `BlocSelector`, so only the changed characteristic rebuilds.
+State uses Riverpod with code generation. `main()` loads the binding before `runApp`. App-wide providers
+are kept alive; Nearby's is disposed with its screen. Session providers watch the current device and free
+their watcher, streams and timers in `ref.onDispose` when it is cleared. Each row watches only its own characteristic, so
+only the changed row rebuilds.
 
 ## Simulator
 

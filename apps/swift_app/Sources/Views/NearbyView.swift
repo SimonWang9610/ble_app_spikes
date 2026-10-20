@@ -19,7 +19,7 @@ struct NearbyView: View {
             if let session = sessions.current {
                 Section("Connected") {
                     Button { path = [session.remoteId] } label: {
-                        DeviceRow(name: session.name, detail: session.status.text, rssi: nil)
+                        DeviceRow(name: session.name, detail: session.connection.status.text, rssi: nil)
                     }
                 }
             }
