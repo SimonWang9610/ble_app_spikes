@@ -94,3 +94,12 @@ private struct DeviceRow: View {
         }
     }
 }
+
+#if DEBUG
+#Preview {
+    let models = PreviewModels()
+    NavigationStack { NearbyView(path: .constant([])) }
+        .environment(models)
+        .task { await models.adapter.observe() }
+}
+#endif

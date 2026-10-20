@@ -78,3 +78,18 @@ private struct LogLine: View {
         }
     }
 }
+
+#if DEBUG
+#Preview {
+    let log = Log()
+    log.event("Connecting to HM-BLE-FIXTURE")
+    log.event("Connected")
+    log.value("NOTIFY received 2a 00 00 00 = 42")
+    log.error("Link lost after 12.3 s")
+    return VStack {
+        Spacer()
+        LogPanel()
+    }
+    .environment(log)
+}
+#endif

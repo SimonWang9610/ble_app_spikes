@@ -127,3 +127,11 @@ private struct CharacteristicRow: View {
         }
     }
 }
+
+#if DEBUG
+#Preview {
+    let models = PreviewModels()
+    NavigationStack { DeviceView(session: models.session()) }
+        .environment(models)
+}
+#endif

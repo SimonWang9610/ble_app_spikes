@@ -129,3 +129,15 @@ private struct WriteResult {
     let text: String
     let failed: Bool
 }
+
+#if DEBUG
+#Preview("Write") {
+    let models = PreviewModels()
+    let characteristic = Characteristic(
+        ref: FakeBle.value,
+        properties: .init(read: true, write: true, writeWithoutResponse: true, notify: false, indicate: false),
+        io: models.ble, log: models.log)
+    CharacteristicSheet(characteristic: characteristic, operation: .write, session: models.session())
+        .environment(models)
+}
+#endif
