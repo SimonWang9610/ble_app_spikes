@@ -13,6 +13,7 @@ struct DeviceSessionTests {
     }
 
     private var notify: Characteristic { session.gatt.characteristic(FakeBle.notify)! }
+    private var value: Characteristic { session.gatt.characteristic(FakeBle.value)! }
 
     @Test func connectsAndDiscovers() async {
         await session.connect()
@@ -20,6 +21,49 @@ struct DeviceSessionTests {
         #expect(session.name == FakeBle.deviceId)
         #expect(session.connection.mtu == 247)
         #expect(session.gatt.services.map { $0.characteristics.count } == [1, 2])
+    }
+
+    @Test func subscribesValueAtConnectAndGetsTheEcho() async throws {
+        await session.connect()
+        #expect(value.subscribed)
+        #expect(logged("VALUE subscribed"))
+        try await value.write(Data("hi".utf8), withoutResponse: false)
+        #expect(await eventually { value.receivedCount == 1 })
+        #expect(value.latest == Data("echo: hi".utf8))
+        #expect(value.latestSource == .received)
+    }
+
+    @Test func writesEvenIfTheSubscribeAtConnectFailed() async throws {
+        await ble.setFailNotify(true)
+        await session.connect()
+        #expect(session.connection.status == .connected)
+        #expect(!value.subscribed)
+        #expect(log.entries.contains { $0.kind == .error && $0.text == "VALUE: subscribe failed: notify failed" })
+        try await value.write(Data([1]), withoutResponse: false)
+        #expect(await ble.calls.last == "write")
+    }
+
+    @Test func reconnectsWhenTheLinkDropsWhileSubscribingAtConnect() async {
+        await ble.setDropOnNotify()
+        await session.connect()
+        #expect(await eventually { reconnectedLine != nil })
+        #expect(logged("VALUE: subscribe failed: not connected"))
+        #expect(session.connection.status == .connected)
+    }
+
+    @Test func disconnectDuringTheSubscribeAtConnectLogsNothingAfter() async {
+        await ble.setNotifyDelay(.milliseconds(200))
+        let connecting = Task { await session.connect() }
+        #expect(await eventually { session.gatt.characteristic(FakeBle.value) != nil })
+        await session.disconnect()
+        await connecting.value
+        #expect(log.entries.last { $0.kind != .api }?.text == "Disconnected")
+    }
+
+    @Test func onlyNotifyOnlyCharacteristicsShowCounters() async {
+        await session.connect()
+        #expect(value.show(Data([1, 2, 3, 4])) == "01 02 03 04")
+        #expect(notify.show(Data([1, 0, 0, 0])) == "01 00 00 00 = 1")
     }
 
     @Test func reportsAFailedConnect() async {
@@ -43,9 +87,9 @@ struct DeviceSessionTests {
         await session.connect()
         await session.subscriptions.set(notify, true)
         await ble.dropLink(FakeBle.deviceId)
-        #expect(await eventually { reconnectedLine?.hasSuffix(", resumed NOTIFY") == true })
+        #expect(await eventually { reconnectedLine?.hasSuffix(", resumed NOTIFY, VALUE") == true })
         #expect(session.connection.status == .connected)
-        #expect(await ble.notifying == [FakeBle.notify])
+        #expect(await ble.notifying == [FakeBle.value, FakeBle.notify])
         #expect(notify.subscribed)
     }
 
@@ -96,7 +140,7 @@ struct DeviceSessionTests {
         #expect(session.connection.status == .disconnected(reason: nil))
         #expect(session.gatt.services.isEmpty)
         #expect(await ble.notifying.isEmpty)
-        #expect(await ble.calls.suffix(3) == ["setNotify(false)", "disconnect", "forget"])
+        #expect(await ble.calls.suffix(4) == ["setNotify(false)", "setNotify(false)", "disconnect", "forget"])
     }
 
     private var reconnectedLine: String? {

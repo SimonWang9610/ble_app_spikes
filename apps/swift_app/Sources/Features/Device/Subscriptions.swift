@@ -33,6 +33,23 @@ final class Subscriptions {
         }
     }
 
+    /// Subscribes, with no busy state, to every one of `characteristics` that echoes writes; a failure is only logged.
+    /// Stops quietly once `ended` says the session is over.
+    func autoSubscribe(_ characteristics: [Characteristic], ended: () -> Bool) async {
+        for characteristic in characteristics where characteristic.echoes && wanted[characteristic.ref] == nil {
+            do {
+                try await enable(characteristic)
+                if ended() { return stop(characteristic) }
+                wanted[characteristic.ref] = characteristic
+                characteristic.markSubscribed(true)
+                log.event("\(characteristic.name) subscribed")
+            } catch {
+                if ended() { return }
+                log.error("\(characteristic.name): subscribe failed: \(describe(error))")
+            }
+        }
+    }
+
     /// Re-applies every subscription on a new link. Fails unless every one is back.
     func resume() async throws {
         for characteristic in wanted.values.sorted(by: { $0.name < $1.name }) {

@@ -13,6 +13,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 /// The result of the last write made from this form.
 typedef _WriteResult = ({DateTime time, String value, String? error});
 
+/// A notification received after that write.
+typedef _Echo = ({DateTime time, String value});
+
 /// Value input, Write button and the last write's result. All of it is UI state, so it stays here.
 class WriteForm extends ConsumerStatefulWidget {
   const WriteForm({super.key, required this.charKey, required this.withoutResponse, required this.enabled});
@@ -30,6 +33,10 @@ class _WriteFormState extends ConsumerState<WriteForm> {
   ValueFormat _format = ValueFormat.hex;
   String? _inputError;
   _WriteResult? _last;
+  _Echo? _echo;
+
+  /// The received count when the last write began; the next value received after it is its echo.
+  int? _echoAfter;
 
   @override
   void dispose() {
@@ -46,18 +53,32 @@ class _WriteFormState extends ConsumerState<WriteForm> {
       setState(() => _inputError = e.message);
       return;
     }
-    setState(() => _inputError = null);
+    setState(() {
+      _inputError = null;
+      _echo = null;
+      _echoAfter = ref.read(characteristicProvider(key)).receivedCount;
+    });
     String? error;
     try {
       await ref.read(characteristicProvider(key).notifier).write(value, withoutResponse: widget.withoutResponse);
     } catch (e) {
       error = describeError(e);
+      _echoAfter = null;
     }
     if (mounted) setState(() => _last = (time: DateTime.now(), value: key.show(value), error: error));
   }
 
   @override
   Widget build(BuildContext context) {
+    ref.listen(characteristicProvider(widget.charKey), (_, c) {
+      if (_echoAfter case final after? when c.receivedCount > after) {
+        setState(() {
+          _echo = (time: c.latestTime!, value: c.show(c.latest!));
+          _echoAfter = null;
+        });
+      }
+    });
+    final subscribed = ref.watch(characteristicProvider(widget.charKey).select((c) => c.subscribed));
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -89,6 +110,10 @@ class _WriteFormState extends ConsumerState<WriteForm> {
         const SizedBox(height: 12),
         FilledButton.tonal(onPressed: widget.enabled ? _write : null, child: const Text('Write')),
         if (_last case final last?) Padding(padding: const EdgeInsets.only(top: 8), child: _result(last)),
+        if (_echo case final echo?)
+          SelectableText('Echo ${formatTime(echo.time)} · ${echo.value}')
+        else if (_last != null && _last!.error == null && _echoAfter != null && subscribed)
+          Text('Waiting for echo…', style: TextStyle(color: context.appColors.muted)),
       ],
     );
   }

@@ -52,6 +52,23 @@ class Subscriptions extends _$Subscriptions {
     });
   }
 
+  /// Subscribes, with no busy state, to every one of `keys` that echoes writes; a failure is only logged.
+  /// Stops quietly once `ended` says the session is over.
+  Future<void> autoSubscribe(Iterable<CharKey> keys, {required bool Function() ended}) async {
+    for (final key in keys.where((k) => k.echoes && !_wanted.contains(k))) {
+      try {
+        await _enable(key);
+        if (ended()) return _streams.remove(key)?.cancel();
+        _wanted.add(key);
+        _char(key).setSubscribed(true);
+        _log.event('${key.name} subscribed');
+      } catch (error) {
+        if (ended()) return;
+        _log.error('${key.name}: subscribe failed: ${describeError(error)}');
+      }
+    }
+  }
+
   /// Re-applies every wanted subscription on a new link.
   Future<void> resume() async {
     for (final key in wanted) {

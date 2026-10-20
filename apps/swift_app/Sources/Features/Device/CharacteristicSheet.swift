@@ -10,6 +10,9 @@ struct CharacteristicSheet: View {
     @State private var input = ""
     @State private var format = ValueFormat.hex
     @State private var lastWrite: WriteResult?
+    /// The received count when the last write began; the next value received after it is its echo.
+    @State private var echoAfter: Int?
+    @State private var echo: String?
 
     var body: some View {
         NavigationStack {
@@ -82,6 +85,16 @@ struct CharacteristicSheet: View {
                     .foregroundStyle(lastWrite.failed ? .red : .green)
                     .textSelection(.enabled)
             }
+            if let echo {
+                Text(echo).font(.callout).textSelection(.enabled)
+            } else if let lastWrite, !lastWrite.failed, echoAfter != nil, characteristic.subscribed {
+                Text("Waiting for echo…").font(.callout).foregroundStyle(.secondary)
+            }
+        }
+        .onChange(of: characteristic.receivedCount) { _, count in
+            guard let after = echoAfter, count > after, let value = characteristic.latest else { return }
+            echo = "Echo \(Self.clock(characteristic.latestTime ?? .now)) · \(characteristic.show(value))"
+            echoAfter = nil
         }
     }
 
@@ -109,19 +122,28 @@ struct CharacteristicSheet: View {
     }
 
     private func write(withoutResponse: Bool) async {
+        echo = nil
+        echoAfter = nil
         do {
             let value = try Data(input, format: format)
+            echoAfter = characteristic.receivedCount
             try await characteristic.write(value, withoutResponse: withoutResponse)
-            let time = Date.now.formatted(Date.ISO8601FormatStyle(timeZone: .current).time(includingFractionalSeconds: false))
+            let time = Self.clock(.now)
             let shown = characteristic.show(value)
             lastWrite = WriteResult(
                 text: withoutResponse ? "Sent \(time) · \(shown) (no acknowledgement)" : "✓ Acknowledged \(time) · \(shown)",
                 failed: false)
         } catch is CancellationError {
             // Disconnect began; nothing to report.
+            echoAfter = nil
         } catch {
             lastWrite = WriteResult(text: describe(error), failed: true)
+            echoAfter = nil
         }
+    }
+
+    private static func clock(_ date: Date) -> String {
+        date.formatted(Date.ISO8601FormatStyle(timeZone: .current).time(includingFractionalSeconds: false))
     }
 }
 
@@ -135,7 +157,7 @@ private struct WriteResult {
     let models = PreviewModels()
     let characteristic = Characteristic(
         ref: FakeBle.value,
-        properties: .init(read: true, write: true, writeWithoutResponse: true, notify: false, indicate: false),
+        properties: .init(read: true, write: true, writeWithoutResponse: true, notify: true, indicate: false),
         io: models.ble, log: models.log)
     CharacteristicSheet(characteristic: characteristic, operation: .write, session: models.session())
         .environment(models)

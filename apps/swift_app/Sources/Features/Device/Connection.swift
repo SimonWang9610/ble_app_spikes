@@ -35,6 +35,8 @@ final class Connection {
     private let log: Log
     @ObservationIgnored private var watcher: Task<Void, Never>?
     @ObservationIgnored private var connectedAt: ContinuousClock.Instant?
+    /// What the watcher last saw.
+    @ObservationIgnored private var linkUp = false
 
     init(remoteId: String, link: any DeviceLink, log: Log) {
         self.remoteId = remoteId
@@ -48,6 +50,10 @@ final class Connection {
     func update(_ status: ConnectionStatus) {
         self.status = status
         connectedAt = status == .connected ? .now : nil
+        // The link dropped while connecting (e.g. during the subscribes); report it now.
+        if status == .connected, watcher != nil, !linkUp {
+            Task { if self.status == .connected { await linkLost() } }
+        }
     }
 
     func connect() async throws {
@@ -81,13 +87,15 @@ final class Connection {
     /// One watcher per link: replaces the previous link's watcher. `close()` cancels it.
     func watch() {
         watcher?.cancel()
+        linkUp = true
         watcher = Task { [weak self] in
             guard let self else { return }
             do {
                 let updates = try await link.connectionStates(remoteId)
                 // Emits the current state first; only a drop from `connected` counts as link loss.
-                for await state in updates where state == .disconnected {
-                    if status == .connected { await linkLost() }
+                for await state in updates {
+                    linkUp = state == .connected
+                    if state == .disconnected, status == .connected { await linkLost() }
                 }
             } catch {
                 log.error("Connection state unavailable: \(describe(error))")

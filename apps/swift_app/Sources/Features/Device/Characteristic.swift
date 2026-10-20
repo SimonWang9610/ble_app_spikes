@@ -33,10 +33,14 @@ final class Characteristic: Identifiable {
     nonisolated var id: CharacteristicRef { ref }
     var name: String { Fixture.shortName(ref.characteristic) }
     var canSubscribe: Bool { properties.notify || properties.indicate }
+    /// Writable and notifying, like VALUE: a write comes back as a notification, so it is subscribed at connect.
+    var echoes: Bool { canSubscribe && (properties.write || properties.writeWithoutResponse) }
+    /// Only notify / indicate characteristics, like NOTIFY, send u32 counters.
+    var sendsCounters: Bool { canSubscribe && !properties.read && !echoes }
 
     /// "2a 00 00 00 = 42" for notify / indicate counters, "68 69 "hi"" for text, hex otherwise.
     func show(_ value: Data) -> String {
-        value.display(asCounter: canSubscribe)
+        value.display(asCounter: sendsCounters)
     }
 
     func read() async {
@@ -50,10 +54,12 @@ final class Characteristic: Identifiable {
     /// Throws, so the dialog can show how its own write went.
     func write(_ value: Data, withoutResponse: Bool) async throws {
         try await perform(busy: "Writing…") {
+            let received = receivedCount
             try await log.api("write \(name) withoutResponse: \(withoutResponse)") {
                 try await io.write(ref, value, withoutResponse: withoutResponse)
             }
-            record(value, .written)
+            // An echo can land before the write returns; it stays the latest value.
+            if receivedCount == received { record(value, .written) }
             log.value("\(name) wrote \(show(value))")
         }
     }

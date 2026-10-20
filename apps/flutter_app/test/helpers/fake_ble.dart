@@ -22,7 +22,9 @@ List<BluetoothService> fixtureServices(String remoteId) => [
     remoteId: remoteId,
     serviceUuid: dataService,
     isPrimary: true,
-    characteristics: [CharacteristicInfo(characteristicUuid: valueUuid, properties: props(read: true, write: true))],
+    characteristics: [
+      CharacteristicInfo(characteristicUuid: valueUuid, properties: props(read: true, write: true, notify: true)),
+    ],
   ),
   BluetoothService(
     remoteId: remoteId,
@@ -63,6 +65,10 @@ class FakeBle implements BleAdapter, DeviceLink, GattIO {
   Completer<void>? holdConnect;
   Duration disconnectDelay = Duration.zero;
   Uint8List readValue = Uint8List.fromList([0x68, 0x69]);
+  bool failNotify = false;
+
+  /// Holds the next setNotify until completed.
+  Completer<void>? holdNotify;
   final notifying = <String>{};
 
   List<Override> get overrides => [
@@ -153,13 +159,21 @@ class FakeBle implements BleAdapter, DeviceLink, GattIO {
     return readValue;
   }
 
+  /// Like the fixture's VALUE: a write to a notifying characteristic comes back as `echo: <value>`.
   @override
-  Future<void> write(CharacteristicRef ref, List<int> value, {required bool withoutResponse}) async =>
-      calls.add('write ${Fixture.shortName(ref.characteristic)} $value');
+  Future<void> write(CharacteristicRef ref, List<int> value, {required bool withoutResponse}) async {
+    calls.add('write ${Fixture.shortName(ref.characteristic)} $value');
+    if (notifying.contains(ref.characteristic)) push(ref.characteristic, [...'echo: '.codeUnits, ...value]);
+  }
 
   @override
   Future<bool> setNotify(CharacteristicRef ref, bool enable) async {
     calls.add('setNotify ${Fixture.shortName(ref.characteristic)} $enable');
+    if (holdNotify case final hold?) {
+      holdNotify = null;
+      await hold.future;
+    }
+    if (failNotify) throw StateError('notify failed');
     enable ? notifying.add(ref.characteristic) : notifying.remove(ref.characteristic);
     return true;
   }

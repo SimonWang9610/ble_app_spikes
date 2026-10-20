@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:flutter_app/core/ble/characteristic_ref.dart';
 import 'package:flutter_app/core/log/logger.dart';
@@ -23,7 +24,8 @@ void main() {
 
   DeviceSession session() => container.read(deviceSessionProvider.notifier);
   ConnectionStatus status() => container.read(connectionProvider).status;
-  CharKey valueKey() => CharKey(CharacteristicRef(deviceId, dataService, valueUuid), props(read: true, write: true));
+  CharKey valueKey() =>
+      CharKey(CharacteristicRef(deviceId, dataService, valueUuid), props(read: true, write: true, notify: true));
   CharKey notifyKey() => CharKey(CharacteristicRef(deviceId, streamService, notifyUuid), props(notify: true));
   CharState char(CharKey key) => container.read(characteristicProvider(key));
 
@@ -50,8 +52,70 @@ void main() {
     expect(log, [
       'Connecting to Fixture',
       'Found 2 services, 2 characteristics (1 non-fixture services hidden)',
+      'VALUE subscribed',
       'Connected',
     ]);
+  });
+
+  test('VALUE is subscribed at connect and a write comes back as its echo', () async {
+    await session().open(deviceId, 'Fixture');
+    container.listen(characteristicProvider(valueKey()), (_, _) {});
+    await container
+        .read(characteristicProvider(valueKey()).notifier)
+        .write(Uint8List.fromList('hi'.codeUnits), withoutResponse: false);
+    await pumpEventQueue();
+
+    final c = char(valueKey());
+    expect(c.subscribed, isTrue);
+    expect(c.receivedCount, 1);
+    expect(c.source, ValueSource.received);
+    expect(c.latest, 'echo: hi'.codeUnits);
+    expect(log, contains('VALUE received 65 63 68 6f 3a 20 68 69 "echo: hi"'));
+  });
+
+  test('a failed subscribe at connect is logged and the write still goes', () async {
+    ble.failNotify = true;
+    await session().open(deviceId, 'Fixture');
+    await container
+        .read(characteristicProvider(valueKey()).notifier)
+        .write(Uint8List.fromList([1]), withoutResponse: false);
+    await pumpEventQueue();
+
+    expect(status(), isA<Connected>());
+    expect(char(valueKey()).subscribed, isFalse);
+    expect(log, contains('VALUE: subscribe failed: Bad state: notify failed'));
+    expect(ble.calls, contains('write VALUE [1]'));
+  });
+
+  test('a link lost while subscribing at connect starts a reconnect', () async {
+    final held = ble.holdNotify = Completer<void>();
+    final opening = session().open(deviceId, 'Fixture');
+    await pumpEventQueue();
+    ble.dropLink(deviceId);
+    await pumpEventQueue();
+    held.complete();
+    await opening;
+    await pumpEventQueue(times: 50);
+
+    expect(status(), isA<Connected>());
+    expect(log, containsAllInOrder([startsWith('Link lost after'), startsWith('Reconnected after')]));
+  });
+
+  test('Disconnect during the subscribe at connect logs nothing after Disconnected', () async {
+    final held = ble.holdNotify = Completer<void>();
+    final opening = session().open(deviceId, 'Fixture');
+    await pumpEventQueue();
+    await session().disconnect();
+    held.complete();
+    await opening;
+    await pumpEventQueue();
+
+    expect(log.last, 'Disconnected');
+  });
+
+  test('only notify-only characteristics show 4-byte values as counters', () {
+    expect(valueKey().show([1, 2, 3, 4]), '01 02 03 04');
+    expect(notifyKey().show([1, 0, 0, 0]), '01 00 00 00 = 1');
   });
 
   test('a failed connect leaves the device current and Disconnected with the reason', () async {
@@ -83,10 +147,10 @@ void main() {
     await pumpEventQueue(times: 50);
 
     expect(status(), isA<Connected>());
-    expect(ble.calls, ['connect $deviceId', 'discoverServices', 'setNotify NOTIFY true']);
+    expect(ble.calls, ['connect $deviceId', 'discoverServices', 'setNotify VALUE true', 'setNotify NOTIFY true']);
     expect(
       log.where((l) => l.startsWith('Reconnected')).single,
-      matches(r'^Reconnected after \d+\.\d s, resumed NOTIFY$'),
+      matches(r'^Reconnected after \d+\.\d s, resumed NOTIFY, VALUE$'),
     );
   });
 
@@ -106,7 +170,7 @@ void main() {
     await session().disconnect();
     await pumpEventQueue();
 
-    expect(ble.calls, ['setNotify NOTIFY false', 'disconnect $deviceId', 'forget $deviceId']);
+    expect(ble.calls, ['setNotify VALUE false', 'setNotify NOTIFY false', 'disconnect $deviceId', 'forget $deviceId']);
     expect(container.read(currentDeviceProvider), isNull);
     expect(container.read(connectionProvider).remoteId, isNull);
     expect(container.read(gattProvider), isEmpty);

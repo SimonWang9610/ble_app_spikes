@@ -17,6 +17,8 @@ class Connection extends _$Connection {
 
   late Logger _log;
   StreamSubscription<BluetoothConnectionState>? _watcher;
+  void Function()? _onLost;
+  bool _linkUp = false;
   final _uptime = Stopwatch();
 
   DeviceLink get _link => ref.read(deviceLinkProvider);
@@ -36,6 +38,8 @@ class Connection extends _$Connection {
       _uptime
         ..reset()
         ..start();
+      // The link dropped while connecting (e.g. during the subscribes); report it now.
+      if (_watcher != null && !_linkUp) _lost();
     }
   }
 
@@ -61,12 +65,18 @@ class Connection extends _$Connection {
   /// Watches the new link, replacing the last one's watcher; `onLost` runs when it drops while Connected.
   void watch({required void Function() onLost}) {
     _unwatch();
+    _onLost = onLost;
+    _linkUp = true;
     _watcher = _link.connectionStates(_id).listen((s) {
+      _linkUp = s == BluetoothConnectionState.connected;
       // The stream emits the current state first; only a drop from Connected is a link loss.
-      if (s != BluetoothConnectionState.disconnected || state.status is! Connected) return;
-      _log.event('Link lost after ${(_uptime.elapsedMilliseconds / 1000).toStringAsFixed(1)} s');
-      onLost();
+      if (s == BluetoothConnectionState.disconnected && state.status is Connected) _lost();
     });
+  }
+
+  void _lost() {
+    _log.event('Link lost after ${(_uptime.elapsedMilliseconds / 1000).toStringAsFixed(1)} s');
+    _onLost?.call();
   }
 
   /// Drops the link or a pending connect, keeping the device; a failed reconnect attempt ends with it.

@@ -32,11 +32,15 @@ class Characteristic extends _$Characteristic {
   /// Completes once the write is done (acknowledged, or sent without response); throws if it failed.
   Future<void> write(Uint8List value, {required bool withoutResponse}) => track('Writing…', () async {
     final io = ref.read(gattIOProvider);
+    final received = state.receivedCount;
     await _log.api(
       'write ${key.name} withoutResponse: $withoutResponse',
       () => io.write(key.ref, value, withoutResponse: withoutResponse),
     );
-    _update((c) => c.copyWith(latest: value, latestTime: DateTime.now(), source: ValueSource.written));
+    // An echo can land before the write returns; it stays the latest value.
+    if (ref.mounted && state.receivedCount == received) {
+      _update((c) => c.copyWith(latest: value, latestTime: DateTime.now(), source: ValueSource.written));
+    }
     _log.value('${key.name} wrote ${key.show(value)}');
   }, rethrowErrors: true);
 

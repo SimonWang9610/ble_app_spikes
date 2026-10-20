@@ -55,6 +55,8 @@ class DeviceSession extends _$DeviceSession {
     _log.event('Connecting to ${_info.name}');
     try {
       if (!await establish()) return;
+      await _subscriptions.autoSubscribe(ref.read(gattProvider).expand((g) => g.chars), ended: () => _ended(device));
+      if (_ended(device)) return;
       connection.setStatus(const Connected());
       _log.event('Connected');
     } catch (error) {

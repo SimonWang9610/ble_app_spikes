@@ -14,7 +14,13 @@ class CharKey {
   String get name => Fixture.shortName(ref.characteristic);
   bool get canSubscribe => properties.notify || properties.indicate;
 
-  String show(List<int> value) => display(value, asCounter: canSubscribe);
+  /// Writable and notifying, like VALUE: a write comes back as a notification, so it is subscribed at connect.
+  bool get echoes => canSubscribe && (properties.write || properties.writeWithoutResponse);
+
+  /// Only notify / indicate characteristics, like NOTIFY, send u32 counters.
+  bool get sendsCounters => canSubscribe && !properties.read && !echoes;
+
+  String show(List<int> value) => display(value, asCounter: sendsCounters);
 
   @override
   bool operator ==(Object other) =>

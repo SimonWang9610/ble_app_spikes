@@ -32,6 +32,7 @@ final class DeviceSession {
         log.event("Connecting to \(name)")
         do {
             try await establish()
+            await subscriptions.autoSubscribe(gatt.services.flatMap(\.characteristics)) { disconnectBegan }
             if settle(.connected) { log.event("Connected") }
         } catch is CancellationError {
         } catch {

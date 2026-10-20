@@ -22,6 +22,9 @@ actor FakeBle: BleAdapter, DeviceLink, GattIO {
     private var devices: [ScanResult]
     private var services: [BluetoothService]
     private var failConnect = false
+    private var failNotify = false
+    private var dropOnNotify = false
+    private var notifyDelay: Duration?
     private var stored: [CharacteristicRef: Data] = [:]
     private var scanStreams: [AsyncStream<[ScanResult]>.Continuation] = []
     private var stateStreams: [String: [AsyncStream<BluetoothConnectionState>.Continuation]] = [:]
@@ -35,6 +38,13 @@ actor FakeBle: BleAdapter, DeviceLink, GattIO {
     // MARK: Scripting
 
     func setFailConnect(_ fail: Bool) { failConnect = fail }
+
+    func setFailNotify(_ fail: Bool) { failNotify = fail }
+
+    /// The link drops during the next setNotify.
+    func setDropOnNotify() { dropOnNotify = true }
+
+    func setNotifyDelay(_ delay: Duration?) { notifyDelay = delay }
 
     /// What the next discovery finds.
     func setServices(_ services: [BluetoothService]) { self.services = services }
@@ -117,14 +127,23 @@ actor FakeBle: BleAdapter, DeviceLink, GattIO {
         return stored[ref] ?? Data("hi".utf8)
     }
 
+    /// Like the fixture's VALUE: a write to a notifying characteristic comes back as "echo: <value>".
     func write(_ ref: CharacteristicRef, _ value: Data, withoutResponse: Bool) throws {
+        calls.append("write")
         guard connected.contains(ref.remoteId) else { throw FakeError.notConnected }
         stored[ref] = value
+        push(Data("echo: ".utf8) + value, to: ref)
     }
 
-    func setNotify(_ ref: CharacteristicRef, _ enable: Bool) throws -> Bool {
+    func setNotify(_ ref: CharacteristicRef, _ enable: Bool) async throws -> Bool {
         calls.append("setNotify(\(enable))")
+        if let notifyDelay { try? await Task.sleep(for: notifyDelay) }
+        if dropOnNotify {
+            dropOnNotify = false
+            dropLink(ref.remoteId)
+        }
         guard connected.contains(ref.remoteId) else { throw FakeError.notConnected }
+        if failNotify { throw FakeError.notifyFailed }
         if enable { notifying.insert(ref) } else { notifying.remove(ref) }
         return enable
     }
@@ -141,12 +160,13 @@ actor FakeBle: BleAdapter, DeviceLink, GattIO {
 }
 
 enum FakeError: LocalizedError {
-    case refused, notConnected
+    case refused, notConnected, notifyFailed
 
     var errorDescription: String? {
         switch self {
         case .refused: "connection refused"
         case .notConnected: "not connected"
+        case .notifyFailed: "notify failed"
         }
     }
 }
@@ -161,7 +181,7 @@ extension FakeBle {
 
     static let fixture = [
         BluetoothService(remoteId: deviceId, serviceUuid: value.service, isPrimary: true, characteristics: [
-            CharacteristicInfo(characteristicUuid: value.characteristic, properties: properties(read: true, write: true)),
+            CharacteristicInfo(characteristicUuid: value.characteristic, properties: properties(read: true, write: true, notify: true)),
         ]),
         BluetoothService(remoteId: deviceId, serviceUuid: notify.service, isPrimary: true, characteristics: [
             CharacteristicInfo(characteristicUuid: notify.characteristic, properties: properties(notify: true)),

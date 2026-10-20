@@ -57,7 +57,7 @@ void main() {
     expect(ble.calls, contains('stopScan'));
     expect(find.text('Connected'), findsOneWidget);
     expect(find.text('RSSI – · MTU 185'), findsOneWidget);
-    expect(find.text('VALUE'), findsNWidgets(2)); // read and write rows
+    expect(find.text('VALUE'), findsNWidgets(3)); // read, write and notify rows
     expect(find.text('NOTIFY'), findsOneWidget);
     expect(find.text('180a'), findsNothing);
   });
@@ -92,6 +92,7 @@ void main() {
     await settle(tester);
     expect(ble.calls, contains('write VALUE [1, 2]'));
     expect(find.textContaining('✓ Acknowledged'), findsOneWidget);
+    expect(find.textContaining(RegExp(r'^Echo .* · 65 63 68 6f 3a 20 01 02$')), findsOneWidget);
   });
 
   testWidgets('Disconnect returns to Nearby and resumes scanning', (tester) async {
@@ -110,7 +111,11 @@ void main() {
   testWidgets('the notify sheet subscribes, shows values and unsubscribes', (tester) async {
     await startApp(tester);
     await openFixture(tester);
-    await tester.tap(find.widgetWithText(ListTile, 'notify'));
+    final notifyRow = find.ancestor(of: find.text('NOTIFY'), matching: find.byType(ListTile));
+    // VALUE's notify row pushes it under the log panel.
+    await tester.ensureVisible(notifyRow);
+    await tester.pump();
+    await tester.tap(notifyRow);
     await settle(tester);
 
     await tester.tap(find.widgetWithText(FilledButton, 'Subscribe'));
