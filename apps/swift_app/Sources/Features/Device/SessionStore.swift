@@ -15,6 +15,7 @@ final class SessionStore {
     }
 
     /// Returns the session for this device, connecting a new one if needed.
+    @discardableResult
     func open(remoteId: String, name: String) -> DeviceSession {
         if let current, current.remoteId == remoteId {
             if case .disconnected = current.connection.status { Task { await current.connect() } }

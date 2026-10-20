@@ -24,11 +24,17 @@ struct LogPanel: View {
                 } else {
                     Spacer()
                 }
-                Image(systemName: expanded ? "chevron.down" : "chevron.up").font(.caption)
+                Button(expanded ? "Hide log" : "Show log", systemImage: expanded ? "chevron.down" : "chevron.up") {
+                    expanded.toggle()
+                }
+                .labelStyle(.iconOnly)
+                .font(.caption)
+                .buttonStyle(.plain)
             }
             .padding(.horizontal)
             .padding(.vertical, 8)
-            .contentShape(Rectangle())
+            // The whole bar toggles too; the chevron is the accessible control.
+            .contentShape(.rect)
             .onTapGesture { expanded.toggle() }
 
             if expanded {

@@ -55,7 +55,7 @@ struct CharacteristicSheet: View {
         Section("Latest") {
             if let value = characteristic.latest, let time = characteristic.latestTime, let source = characteristic.latestSource {
                 Text(characteristic.show(value)).font(.body.monospaced()).textSelection(.enabled)
-                Text("\(source.rawValue) at \(time.formatted(date: .omitted, time: .standard))")
+                Text("\(source.rawValue) at \(time, format: .dateTime.hour().minute().second())")
                     .font(.caption).foregroundStyle(.secondary)
             } else {
                 Text("No value yet").foregroundStyle(.secondary)
@@ -92,7 +92,7 @@ struct CharacteristicSheet: View {
             if let value = characteristic.latest, characteristic.latestSource == .received, let time = characteristic.latestTime {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(characteristic.show(value)).font(.body.monospaced()).textSelection(.enabled)
-                    Text("received at \(time.formatted(date: .omitted, time: .standard))")
+                    Text("received at \(time, format: .dateTime.hour().minute().second())")
                         .font(.caption).foregroundStyle(.secondary)
                 }
             } else {
