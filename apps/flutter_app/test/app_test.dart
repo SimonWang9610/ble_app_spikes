@@ -106,4 +106,35 @@ void main() {
     expect(ble.calls, containsAll(['disconnect $deviceId', 'forget $deviceId', 'startScan [HM-BLE-FIXTURE]']));
     expect(find.text('Connected'), findsNothing);
   });
+
+  testWidgets('the notify sheet subscribes, shows values and unsubscribes', (tester) async {
+    await startApp(tester);
+    await openFixture(tester);
+    await tester.tap(find.widgetWithText(ListTile, 'notify'));
+    await settle(tester);
+
+    await tester.tap(find.widgetWithText(FilledButton, 'Subscribe'));
+    await settle(tester);
+    ble.push(notifyUuid, [5, 0, 0, 0]);
+    await settle(tester);
+    expect(find.text('Subscribed · 1 received'), findsOneWidget);
+    expect(find.text('05 00 00 00 = 5'), findsOneWidget);
+
+    await tester.tap(find.widgetWithText(OutlinedButton, 'Unsubscribe'));
+    await settle(tester);
+    expect(find.text('Not subscribed · 1 received'), findsOneWidget);
+    expect(ble.calls, containsAllInOrder(['setNotify NOTIFY true', 'setNotify NOTIFY false']));
+  });
+
+  testWidgets('the log panel has the startup API calls', (tester) async {
+    await startApp(tester);
+    await tester.tap(find.text('Log'));
+    await settle(tester);
+    await tester.tap(find.text('API calls'));
+    await settle(tester);
+
+    // The first line comes from the adapter's build, so the log must already be listening.
+    expect(find.textContaining(RegExp(r'initialize\(defaultTimeout: 15s\)$')), findsOneWidget);
+    expect(find.textContaining('initialize(defaultTimeout: 15s) ok'), findsOneWidget);
+  });
 }
