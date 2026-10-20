@@ -58,6 +58,10 @@ class FakeBle implements BleAdapter, DeviceLink, GattIO {
 
   /// Connect attempts that fail before one succeeds.
   int connectFailures = 0;
+
+  /// Holds the next connect until completed.
+  Completer<void>? holdConnect;
+  Duration disconnectDelay = Duration.zero;
   Uint8List readValue = Uint8List.fromList([0x68, 0x69]);
   final notifying = <String>{};
 
@@ -97,6 +101,10 @@ class FakeBle implements BleAdapter, DeviceLink, GattIO {
   @override
   Future<void> connect(String remoteId, Duration timeout) async {
     calls.add('connect $remoteId');
+    if (holdConnect case final hold?) {
+      holdConnect = null;
+      await hold.future;
+    }
     if (connectFailures > 0) {
       connectFailures--;
       throw StateError('connect failed');
@@ -108,7 +116,9 @@ class FakeBle implements BleAdapter, DeviceLink, GattIO {
   @override
   Future<void> disconnect(String remoteId) async {
     calls.add('disconnect $remoteId');
+    await Future<void>.delayed(disconnectDelay);
     _connected.remove(remoteId);
+    _links[remoteId]?.add(BluetoothConnectionState.disconnected);
   }
 
   @override
