@@ -1,14 +1,14 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_app/core/theme/app_colors.dart';
 import 'package:flutter_app/features/device/domain/operation.dart';
 
-/// The same colours as the Swift app's operation pills.
 extension OperationColor on Operation {
-  Color get color => switch (this) {
-    Operation.read => const Color(0xFF007AFF),
-    Operation.write => const Color(0xFFAF52DE),
-    Operation.writeWithoutResponse => const Color(0xFF5856D6),
-    Operation.notify => const Color(0xFF34C759),
-    Operation.indicate => const Color(0xFF30B0C7),
+  Color color(AppColors colors) => switch (this) {
+    Operation.read => colors.read,
+    Operation.write => colors.write,
+    Operation.writeWithoutResponse => colors.writeWithoutResponse,
+    Operation.notify => colors.notify,
+    Operation.indicate => colors.indicate,
   };
 }
 
@@ -20,15 +20,13 @@ class OperationChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final color = operation.color(context.appColors);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-      decoration: BoxDecoration(
-        color: operation.color.withValues(alpha: 0.15),
-        borderRadius: BorderRadius.circular(999),
-      ),
+      decoration: BoxDecoration(color: color.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(999)),
       child: Text(
         operation.label,
-        style: TextStyle(color: operation.color, fontSize: 12, fontWeight: FontWeight.w600),
+        style: TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.w600),
       ),
     );
   }
