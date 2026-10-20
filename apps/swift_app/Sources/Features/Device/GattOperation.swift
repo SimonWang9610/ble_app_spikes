@@ -21,7 +21,7 @@ enum GattOperation: CaseIterable {
         case .write: .purple
         case .writeWithoutResponse: .indigo
         case .notify: .green
-        case .indicate: .cyan
+        case .indicate: .teal
         }
     }
 
