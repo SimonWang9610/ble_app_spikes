@@ -10,11 +10,11 @@ actor FakeBle: BleAdapter, DeviceLink, GattIO {
         remoteId: deviceId, service: "f0e10000-5a3e-4c1a-9d2b-1b2c3d4e5f60",
         characteristic: "f0e10001-5a3e-4c1a-9d2b-1b2c3d4e5f60")
     static let notify = CharacteristicRef(
-        remoteId: deviceId, service: "f0e10100-5a3e-4c1a-9d2b-1b2c3d4e5f60",
-        characteristic: "f0e10101-5a3e-4c1a-9d2b-1b2c3d4e5f60")
+        remoteId: deviceId, service: "5a7e0000-8c2d-4b6e-9f1a-2b3c4d5e6f70",
+        characteristic: "5a7e0001-8c2d-4b6e-9f1a-2b3c4d5e6f70")
     static let indicate = CharacteristicRef(
-        remoteId: deviceId, service: "f0e10100-5a3e-4c1a-9d2b-1b2c3d4e5f60",
-        characteristic: "f0e10102-5a3e-4c1a-9d2b-1b2c3d4e5f60")
+        remoteId: deviceId, service: "5a7e0000-8c2d-4b6e-9f1a-2b3c4d5e6f70",
+        characteristic: "5a7e0002-8c2d-4b6e-9f1a-2b3c4d5e6f70")
 
     private(set) var calls: [String] = []
     private(set) var connected: Set<String> = []
@@ -25,7 +25,6 @@ actor FakeBle: BleAdapter, DeviceLink, GattIO {
     private var failNotify = false
     private var dropOnNotify = false
     private var notifyDelay: Duration?
-    private var stored: [CharacteristicRef: Data] = [:]
     private var scanStreams: [AsyncStream<[ScanResult]>.Continuation] = []
     private var stateStreams: [String: [AsyncStream<BluetoothConnectionState>.Continuation]] = [:]
     private var valueStreams: [CharacteristicRef: [AsyncStream<Data>.Continuation]] = [:]
@@ -124,14 +123,13 @@ actor FakeBle: BleAdapter, DeviceLink, GattIO {
 
     func read(_ ref: CharacteristicRef) throws -> Data {
         guard connected.contains(ref.remoteId) else { throw FakeError.notConnected }
-        return stored[ref] ?? Data("hi".utf8)
+        return Data("hi".utf8)
     }
 
     /// Like the fixture's VALUE: a write to a notifying characteristic comes back as "echo: <value>".
     func write(_ ref: CharacteristicRef, _ value: Data, withoutResponse: Bool) throws {
         calls.append("write")
         guard connected.contains(ref.remoteId) else { throw FakeError.notConnected }
-        stored[ref] = value
         push(Data("echo: ".utf8) + value, to: ref)
     }
 

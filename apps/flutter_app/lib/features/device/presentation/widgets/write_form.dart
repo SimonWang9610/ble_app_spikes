@@ -35,7 +35,7 @@ class _WriteFormState extends ConsumerState<WriteForm> {
   _WriteResult? _last;
   _Echo? _echo;
 
-  /// The received count when the last write began; the next value received after it is its echo.
+  /// The received count when the last write with response began; the next value received after it is its echo.
   int? _echoAfter;
 
   @override
@@ -56,7 +56,8 @@ class _WriteFormState extends ConsumerState<WriteForm> {
     setState(() {
       _inputError = null;
       _echo = null;
-      _echoAfter = ref.read(characteristicProvider(key)).receivedCount;
+      // A write without response gets no echo shown, even if the device sends one.
+      _echoAfter = widget.withoutResponse ? null : ref.read(characteristicProvider(key)).receivedCount;
     });
     String? error;
     try {

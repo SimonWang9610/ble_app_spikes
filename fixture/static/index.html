@@ -166,8 +166,8 @@ function showValue(hex, asCounter) {
   return n === null ? hex : `${hex} = ${n}`;
 }
 
-const showStored = (v) => `${v.hex || "(empty)"}${v.text ? `  "${v.text}"` : ""}`;
-const showLast = (l, asCounter) => (l ? `${showValue(l.value, asCounter)} at ${l.time}` : "nothing yet");
+const showLast = (l, asCounter) =>
+  l ? `${showValue(l.value, asCounter)}${!asCounter && l.text ? `  "${l.text}"` : ""} at ${l.time}` : "nothing yet";
 
 function findChar(name) {
   for (const s of state.services) for (const c of s.characteristics) if (c.name === name) return [s, c];
@@ -278,16 +278,12 @@ function openDialog(name, op) {
 
   if (op === "read") {
     body.insertAdjacentHTML("beforeend", `
-      <div class="field"><span>Phones get</span><span class="mono" data-show="stored"></span></div>
-      <div class="field"><span>Last read</span><span class="mono" data-show="read"></span></div>
-      <div class="actions">${valueInput()}<button class="primary" data-act="set">Set</button></div>
-      <div class="hint">Set sends nothing; the phone gets it on its next read.</div>`);
-    body.querySelector("[data-act=set]").onclick = () => call("stored", { char: name, ...readInput(body) });
+      <div class="field"><span>Phones get</span><span>the current time, as text (HH:MM:SS)</span></div>
+      <div class="field"><span>Last read</span><span class="mono" data-show="read"></span></div>`);
   } else if (op.startsWith("write")) {
     body.insertAdjacentHTML("beforeend", `
       <div class="field"><span>Last write</span><span class="mono" data-show="write"></span></div>
-      <div class="field"><span>Stored</span><span class="mono" data-show="stored"></span></div>
-      <div class="hint">A phone's write replaces this value${c.echo ? " and comes back to subscribed phones as \"echo: &lt;value&gt;\"" : ""}.
+      <div class="hint">A write never changes what a read returns${c.echo ? "; it comes back to subscribed phones as \"echo: &lt;value&gt;\"" : ""}.
         The Mac can't tell a write with response from one without.</div>`);
   } else if (c.echo) {
     body.insertAdjacentHTML("beforeend", `
@@ -326,8 +322,7 @@ function renderDialog() {
   const [, c] = findChar(openOp.name);
   const body = $("dlg-body");
   const set = (key, text) => { const el = body.querySelector(`[data-show=${key}]`); if (el) el.textContent = text; };
-  if (c.stored) set("stored", showStored(c.stored));
-  set("read", c.last.read ? c.last.read.time : "not read yet");
+  set("read", showLast(c.last.read, false));
   set("write", showLast(c.last.write, false));
   if (c.subscribers) {
     set("subs", c.subscribers.length ? `${phones(c.subscribers.length)} (${c.subscribers.map((p) => p.slice(0, 8) + "…").join(", ")})` : "no phone");

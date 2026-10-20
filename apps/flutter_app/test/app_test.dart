@@ -57,7 +57,8 @@ void main() {
     expect(ble.calls, contains('stopScan'));
     expect(find.text('Connected'), findsOneWidget);
     expect(find.text('RSSI – · MTU 185'), findsOneWidget);
-    expect(find.text('VALUE'), findsNWidgets(3)); // read, write and notify rows
+    expect(find.text('VALUE'), findsNWidgets(4)); // read, write, write without response and notify rows
+    await tester.scrollUntilVisible(find.text('NOTIFY'), 100, scrollable: find.byType(Scrollable).first);
     expect(find.text('NOTIFY'), findsOneWidget);
     expect(find.text('180a'), findsNothing);
   });
@@ -95,6 +96,21 @@ void main() {
     expect(find.textContaining(RegExp(r'^Echo .* · 65 63 68 6f 3a 20 01 02$')), findsOneWidget);
   });
 
+  testWidgets('the write without response sheet shows no echo', (tester) async {
+    await startApp(tester);
+    await openFixture(tester);
+    await tester.tap(find.widgetWithText(ListTile, 'write without response'));
+    await settle(tester);
+
+    await tester.enterText(find.byType(TextField), '01');
+    await tester.tap(find.widgetWithText(FilledButton, 'Write'));
+    await settle(tester);
+    expect(ble.calls, contains('write VALUE [1]'));
+    expect(find.textContaining('(no acknowledgement)'), findsOneWidget);
+    expect(find.textContaining('Echo '), findsNothing);
+    expect(find.text('Waiting for echo…'), findsNothing);
+  });
+
   testWidgets('Disconnect returns to Nearby and resumes scanning', (tester) async {
     await startApp(tester);
     await openFixture(tester);
@@ -112,7 +128,8 @@ void main() {
     await startApp(tester);
     await openFixture(tester);
     final notifyRow = find.ancestor(of: find.text('NOTIFY'), matching: find.byType(ListTile));
-    // VALUE's notify row pushes it under the log panel.
+    // VALUE's rows push it below the screen and under the log panel.
+    await tester.scrollUntilVisible(find.text('NOTIFY'), 100, scrollable: find.byType(Scrollable).first);
     await tester.ensureVisible(notifyRow);
     await tester.pump();
     await tester.tap(notifyRow);

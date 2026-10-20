@@ -28,10 +28,10 @@ GATT = {
         },
     },
     "STREAM": {
-        "uuid": "f0e10100-5a3e-4c1a-9d2b-1b2c3d4e5f60",
+        "uuid": "5a7e0000-8c2d-4b6e-9f1a-2b3c4d5e6f70",
         "characteristics": {
-            "NOTIFY": ("f0e10101-5a3e-4c1a-9d2b-1b2c3d4e5f60", ["notify"]),
-            "INDICATE": ("f0e10102-5a3e-4c1a-9d2b-1b2c3d4e5f60", ["indicate"]),
+            "NOTIFY": ("5a7e0001-8c2d-4b6e-9f1a-2b3c4d5e6f70", ["notify"]),
+            "INDICATE": ("5a7e0002-8c2d-4b6e-9f1a-2b3c4d5e6f70", ["indicate"]),
         },
     },
 }
@@ -79,18 +79,16 @@ class Mock:
 
 
 class Fixture:
-    """The peripheral: stored values, streams, publishing, and what the control page shows."""
+    """The peripheral: VALUE's read and echo, streams, publishing, and what the control page shows."""
 
     def __init__(self):
         self.server = BlessServer(name=NAME)
         self.server.read_request_func = self._on_read
         self.server.write_request_func = self._on_write
-        # Returned to phones on read; VALUE is also replaced by their writes.
-        self.stored = {"VALUE": b"\x01\x02\x03\x04"}
         self.streams = {"NOTIFY": Stream(), "INDICATE": Stream()}
         self.echoes = 0  # VALUE echoes sent
         self.mock = Mock()
-        self.last = {}  # characteristic -> "read" / "write" / "set" / "sent" -> {"value", "time"}
+        self.last = {}  # characteristic -> "read" / "write" / "sent" -> {"value", "text", "time"}
         self.published = False
         self.bt_state = "unknown"
         self.centrals = {}  # central id -> subscribed characteristic names
@@ -102,7 +100,8 @@ class Fixture:
 
     def _on_read(self, char, **_):
         name = NAMES.get(str(char.uuid).lower(), str(char.uuid))
-        value = self.stored.get(name, b"")
+        # The current time, so each read shows a fresh value; writes never change it.
+        value = time.strftime("%H:%M:%S").encode() if name == "VALUE" else b""
         self._record(name, "read", value)
         log.info("%s phone read %s", name, _show(value), extra=READ)
         return bytearray(value)
@@ -110,15 +109,13 @@ class Fixture:
     def _on_write(self, char, value, **_):
         name = NAMES.get(str(char.uuid).lower(), str(char.uuid))
         value = bytes(value)
-        if name == "VALUE":
-            self.stored[name] = value
         self._record(name, "write", value)
         log.info("%s phone wrote %s", name, _show(value), extra=WRITE)
         if name == "VALUE" and self.loop:
             self.loop.call_soon_threadsafe(self._echo, name, value)
 
     def _record(self, name, op, value):
-        self.last.setdefault(name, {})[op] = {"value": value.hex(" "), "time": time.strftime("%H:%M:%S")}
+        self.last.setdefault(name, {})[op] = {"value": value.hex(" "), "text": _value_json(value)["text"], "time": time.strftime("%H:%M:%S")}
         self.changed()
 
     # State for the control page
@@ -133,8 +130,6 @@ class Fixture:
             characteristics = []
             for name, (uuid, props) in s["characteristics"].items():
                 char = {"name": name, "uuid": uuid, "properties": props, "last": self.last.get(name, {})}
-                if name in self.stored:
-                    char["stored"] = _value_json(self.stored[name])
                 if name in self.streams:
                     stream = self.streams[name]
                     char["stream"] = {
@@ -305,14 +300,6 @@ class Fixture:
             delegate.peripheral_manager.stopAdvertising()
             log.info("Advertising stopped", extra=LINK)
         self.changed()
-
-    def set_stored(self, name, value):
-        """Changes what phones get on their next read; sends nothing."""
-        if name not in self.stored:
-            raise ValueError(f"{name} has no stored value")
-        self.stored[name] = value
-        self._record(name, "set", value)
-        log.info("%s set to %s (phones read it next)", name, _show(value), extra=SET)
 
     def set_stream(self, name, interval=None, paused=None):
         stream = self._stream(name)

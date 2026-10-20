@@ -8,13 +8,13 @@ import 'package:flutter_app/core/fixture/fixture.dart';
 import 'package:flutter_riverpod/misc.dart';
 
 const valueUuid = 'f0e10001-5a3e-4c1a-9d2b-1b2c3d4e5f60';
-const notifyUuid = 'f0e10101-5a3e-4c1a-9d2b-1b2c3d4e5f60';
+const notifyUuid = '5a7e0001-8c2d-4b6e-9f1a-2b3c4d5e6f70';
 const dataService = 'f0e10000-5a3e-4c1a-9d2b-1b2c3d4e5f60';
-const streamService = 'f0e10100-5a3e-4c1a-9d2b-1b2c3d4e5f60';
+const streamService = '5a7e0000-8c2d-4b6e-9f1a-2b3c4d5e6f70';
 const deviceId = 'fixture-1';
 
 CharacteristicProperties props({bool read = false, bool write = false, bool notify = false}) =>
-    CharacteristicProperties(read: read, write: write, writeWithoutResponse: false, notify: notify, indicate: false);
+    CharacteristicProperties(read: read, write: write, writeWithoutResponse: write, notify: notify, indicate: false);
 
 /// The fixture's DATA and STREAM services, plus one service of the Mac's own.
 List<BluetoothService> fixtureServices(String remoteId) => [

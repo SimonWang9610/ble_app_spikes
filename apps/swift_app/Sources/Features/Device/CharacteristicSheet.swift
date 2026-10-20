@@ -10,7 +10,7 @@ struct CharacteristicSheet: View {
     @State private var input = ""
     @State private var format = ValueFormat.hex
     @State private var lastWrite: WriteResult?
-    /// The received count when the last write began; the next value received after it is its echo.
+    /// The received count when the last write with response began; the next value received after it is its echo.
     @State private var echoAfter: Int?
     @State private var echo: String?
 
@@ -126,7 +126,8 @@ struct CharacteristicSheet: View {
         echoAfter = nil
         do {
             let value = try Data(input, format: format)
-            echoAfter = characteristic.receivedCount
+            // A write without response gets no echo shown, even if the device sends one.
+            echoAfter = withoutResponse ? nil : characteristic.receivedCount
             try await characteristic.write(value, withoutResponse: withoutResponse)
             let time = Self.clock(.now)
             let shown = characteristic.show(value)

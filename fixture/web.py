@@ -51,8 +51,6 @@ async def serve(fixture, handler, port):
                     await fixture.set_bluetooth(bool(body["on"]))
                 case "mock":
                     await fixture.set_mock(bool(body["on"]), body.get("interval"), body.get("off"))
-                case "stored":
-                    fixture.set_stored(body["char"], _value(body))
                 case "stream":
                     fixture.set_stream(body["char"], body.get("interval"), body.get("paused"))
                 case "send":
