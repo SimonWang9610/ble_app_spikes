@@ -27,6 +27,8 @@ targets:
         TARGETED_DEVICE_FAMILY: "1,2"
         MARKETING_VERSION: "0.1.0"
         CURRENT_PROJECT_VERSION: "1"
+    scheme:
+      testTargets: [BlePocSwiftAppTests]
     info:
       path: Sources/Info.plist
       properties:
@@ -37,3 +39,13 @@ targets:
           [UIInterfaceOrientationPortrait, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
         UISupportedInterfaceOrientations~ipad:
           [UIInterfaceOrientationPortrait, UIInterfaceOrientationPortraitUpsideDown, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
+  BlePocSwiftAppTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources: [Tests]
+    dependencies:
+      - target: BlePocSwiftApp
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.spike.blepoc.swift.tests
+        GENERATE_INFOPLIST_FILE: YES
