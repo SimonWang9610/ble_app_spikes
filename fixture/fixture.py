@@ -24,7 +24,7 @@ GATT = {
     "DATA": {
         "uuid": "f0e10000-5a3e-4c1a-9d2b-1b2c3d4e5f60",
         "characteristics": {
-            "VALUE": ("f0e10001-5a3e-4c1a-9d2b-1b2c3d4e5f60", ["read", "write", "write-without-response"]),
+            "VALUE": ("f0e10001-5a3e-4c1a-9d2b-1b2c3d4e5f60", ["read", "write", "write-without-response", "notify"]),
         },
     },
     "STREAM": {
@@ -88,6 +88,7 @@ class Fixture:
         # Returned to phones on read; VALUE is also replaced by their writes.
         self.stored = {"VALUE": b"\x01\x02\x03\x04"}
         self.streams = {"NOTIFY": Stream(), "INDICATE": Stream()}
+        self.echoes = 0  # VALUE echoes sent
         self.mock = Mock()
         self.last = {}  # characteristic -> "read" / "write" / "set" / "sent" -> {"value", "time"}
         self.published = False
@@ -113,6 +114,8 @@ class Fixture:
             self.stored[name] = value
         self._record(name, "write", value)
         log.info("%s phone wrote %s", name, _show(value), extra=WRITE)
+        if name == "VALUE" and self.loop:
+            self.loop.call_soon_threadsafe(self._echo, name, value)
 
     def _record(self, name, op, value):
         self.last.setdefault(name, {})[op] = {"value": value.hex(" "), "time": time.strftime("%H:%M:%S")}
@@ -140,6 +143,9 @@ class Fixture:
                         "counter": stream.counter,
                         "sent": stream.sent,
                     }
+                if name == "VALUE":
+                    char["echo"] = {"sent": self.echoes}
+                if "notify" in props or "indicate" in props:
                     char["subscribers"] = self.subscribers(name)
                 characteristics.append(char)
             services.append({"name": service, "uuid": s["uuid"], "characteristics": characteristics})
@@ -334,21 +340,39 @@ class Fixture:
             stream.counter += 1
             counter = stream.counter
             value = struct.pack("<I", counter)
-        _, uuid, props = CHARS[name]
-        # Sent directly, not stored on the characteristic: a stored value would make CoreBluetooth
-        # treat it as cached, and re-adding the service would then fail.
-        pm = self.server.peripheral_manager_delegate.peripheral_manager
-        char = self.server.get_characteristic(uuid).obj
-        if not pm.updateValue_forCharacteristic_onSubscribedCentrals_(NSData.dataWithBytes_length_(value, len(value)), char, None):
-            log.warning("%s not sent, CoreBluetooth's send queue is full", name, extra=WARN)
+        if not self._update(name, value):
             return
         stream.sent += 1
         self._record(name, "sent", value)
         d = self.drop
         if d and name in d["resubscribed"] and name not in d["first_sent"]:
             d["first_sent"][name] = {"time": time.time(), "value": _show(value, True), "counter": counter}
-        kind = {"kind": "indicate" if "indicate" in props else "notify"}
+        kind = {"kind": "indicate" if "indicate" in CHARS[name][2] else "notify"}
         log.info("%s sent %s to %s", name, _show(value, True), _phones(len(phones)), extra=kind)
+
+    def _echo(self, name, value):
+        """Notifies "echo: <value>" to the phones subscribed to `name`, after one of them wrote `value`."""
+        echo = b"echo: " + value
+        phones = self.subscribers(name)
+        if not phones:
+            log.info("%s echo not sent, no phone subscribed", name, extra=WARN)
+            return
+        if not self._update(name, echo):
+            return
+        self.echoes += 1
+        self._record(name, "sent", echo)
+        log.info("%s sent echo %s to %s", name, _show(echo), _phones(len(phones)), extra={"kind": "notify"})
+
+    def _update(self, name, value):
+        """Sends `value` to the phones subscribed to `name`; False if CoreBluetooth's queue is full."""
+        # Sent directly, not stored on the characteristic: a stored value would make CoreBluetooth
+        # treat it as cached, and re-adding the service would then fail.
+        pm = self.server.peripheral_manager_delegate.peripheral_manager
+        char = self.server.get_characteristic(CHARS[name][1]).obj
+        if not pm.updateValue_forCharacteristic_onSubscribedCentrals_(NSData.dataWithBytes_length_(value, len(value)), char, None):
+            log.warning("%s not sent, CoreBluetooth's send queue is full", name, extra=WARN)
+            return False
+        return True
 
     def _stream(self, name):
         if name not in self.streams:
@@ -395,7 +419,7 @@ class Fixture:
                 for central, names in now.items():
                     for name in sorted(names - self.centrals.get(central, set())):
                         log.info("%s phone subscribed (%s…)", name, central[:8], extra=SUBSCRIBE)
-                        if self.drop and self.drop.get("on"):
+                        if self.drop and self.drop.get("on") and name in self.streams:
                             self.drop["resubscribed"].setdefault(name, time.time())
                 for central, names in self.centrals.items():
                     for name in sorted(names - now.get(central, set())):

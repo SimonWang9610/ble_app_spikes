@@ -249,9 +249,10 @@ function renderRows(services) {
       const sub = rows[c.name];
       if (!sub) continue;
       const on = c.subscribers.length > 0;
+      const sent = (c.stream || c.echo).sent;
       sub.className = `sub${on ? " on" : ""}`;
-      sub.textContent = on ? `◉ ${c.stream.sent}` : "○";
-      sub.title = on ? `${phones(c.subscribers.length)} subscribed, ${c.stream.sent} sent` : "no phone subscribed";
+      sub.textContent = on ? `◉ ${sent}` : "○";
+      sub.title = on ? `${phones(c.subscribers.length)} subscribed, ${sent} sent` : "no phone subscribed";
     }
   }
 }
@@ -286,7 +287,13 @@ function openDialog(name, op) {
     body.insertAdjacentHTML("beforeend", `
       <div class="field"><span>Last write</span><span class="mono" data-show="write"></span></div>
       <div class="field"><span>Stored</span><span class="mono" data-show="stored"></span></div>
-      <div class="hint">A phone's write replaces this value. The Mac can't tell a write with response from one without.</div>`);
+      <div class="hint">A phone's write replaces this value${c.echo ? " and comes back to subscribed phones as \"echo: &lt;value&gt;\"" : ""}.
+        The Mac can't tell a write with response from one without.</div>`);
+  } else if (c.echo) {
+    body.insertAdjacentHTML("beforeend", `
+      <div class="field"><span>Subscribed</span><span data-show="subs"></span></div>
+      <div class="field"><span>Last echo</span><span class="mono" data-show="sent"></span></div>
+      <div class="hint">Each phone write is sent back as a notification, "echo: &lt;value&gt;", only to subscribed phones.</div>`);
   } else {
     const kind = op === "indicate" ? "indications" : "notifications";
     body.insertAdjacentHTML("beforeend", `
@@ -322,10 +329,12 @@ function renderDialog() {
   if (c.stored) set("stored", showStored(c.stored));
   set("read", c.last.read ? c.last.read.time : "not read yet");
   set("write", showLast(c.last.write, false));
-  if (c.stream) {
+  if (c.subscribers) {
     set("subs", c.subscribers.length ? `${phones(c.subscribers.length)} (${c.subscribers.map((p) => p.slice(0, 8) + "…").join(", ")})` : "no phone");
+    set("sent", showLast(c.last.sent, !!c.stream));
+  }
+  if (c.stream) {
     set("counter", c.stream.counter);
-    set("sent", showLast(c.last.sent, true));
     body.querySelector("[data-act=pause]").textContent = c.stream.paused ? "Resume" : "Pause";
   }
 }

@@ -13,7 +13,7 @@ peripheral, with a control page that mirrors the apps.
 | `docs/design-v2.md` | screens, state, reconnect rules, fixture page |
 
 Bindings are used in place from
-`/Users/WANGDX94/projects/rust-interoperability-poc/.worktree/ble-poc-foundation/dist`; rebuild them
+`rust-interoperability-poc/.worktree/ble-poc-foundation/dist`; rebuild them
 there, then rebuild the apps.
 
 ## Setup
