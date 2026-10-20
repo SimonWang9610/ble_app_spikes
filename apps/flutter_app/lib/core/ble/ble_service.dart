@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
 import 'package:ble_poc_dart/ble_poc_dart.dart';
+import 'package:flutter_app/core/ble/characteristic_ref.dart';
 import 'package:flutter_app/core/ble/stream_bridge.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
@@ -19,15 +20,6 @@ DeviceLink deviceLink(Ref ref) => ref.watch(_bleServiceProvider);
 
 @Riverpod(keepAlive: true)
 GattIO gattIO(Ref ref) => ref.watch(_bleServiceProvider);
-
-/// Identifies one characteristic of one device.
-class CharacteristicRef {
-  const CharacteristicRef(this.remoteId, this.service, this.characteristic);
-
-  final String remoteId;
-  final String service;
-  final String characteristic;
-}
 
 /// The manager: initialize, adapter state, scanning.
 abstract interface class BleAdapter {

@@ -1,5 +1,5 @@
 import 'package:ble_poc_dart/ble_poc_dart.dart';
-import 'package:flutter_app/core/ble/ble_service.dart';
+import 'package:flutter_app/core/ble/characteristic_ref.dart';
 import 'package:flutter_app/core/fixture/fixture.dart';
 import 'package:flutter_app/core/utils/bytes.dart';
 

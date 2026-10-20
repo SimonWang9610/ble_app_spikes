@@ -1,4 +1,4 @@
-import 'package:flutter_app/core/ble/ble_service.dart';
+import 'package:flutter_app/core/ble/characteristic_ref.dart';
 import 'package:flutter_app/core/log/logger.dart';
 import 'package:flutter_app/features/device/application/characteristic.dart';
 import 'package:flutter_app/features/device/application/connection.dart';
