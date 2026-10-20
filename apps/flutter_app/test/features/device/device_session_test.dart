@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_app/core/ble/characteristic_ref.dart';
 import 'package:flutter_app/core/log/logger.dart';
 import 'package:flutter_app/features/device/application/characteristic.dart';
@@ -21,6 +23,7 @@ void main() {
 
   DeviceSession session() => container.read(deviceSessionProvider.notifier);
   ConnectionStatus status() => container.read(connectionProvider).status;
+  CharKey valueKey() => CharKey(CharacteristicRef(deviceId, dataService, valueUuid), props(read: true, write: true));
   CharKey notifyKey() => CharKey(CharacteristicRef(deviceId, streamService, notifyUuid), props(notify: true));
   CharState char(CharKey key) => container.read(characteristicProvider(key));
 
@@ -116,5 +119,76 @@ void main() {
 
     expect(ble.calls, containsAllInOrder(['disconnect $deviceId', 'forget $deviceId', 'connect other']));
     expect(container.read(connectionProvider).name, 'Other');
+  });
+
+  test('opening the same device after a failed connect connects again', () async {
+    ble.connectFailures = 1;
+    await session().open(deviceId, 'Fixture');
+    await session().open(deviceId, 'Fixture');
+
+    expect(status(), isA<Connected>());
+  });
+
+  test('while reconnecting, values stop and Disconnect ends the retries', () async {
+    await openAndSubscribe();
+    ble.connectFailures = 1000;
+    // The value lands right behind the loss, before the first retry fails.
+    ble
+      ..dropLink(deviceId)
+      ..push(notifyUuid, [9, 0, 0, 0]);
+    await pumpEventQueue();
+    expect(status(), isA<Reconnecting>());
+    expect(char(notifyKey()).receivedCount, 0);
+
+    await session().disconnect();
+    final attempts = ble.calls.where((c) => c.startsWith('connect')).length;
+    await Future<void>.delayed(const Duration(milliseconds: 1500));
+    expect(ble.calls.where((c) => c.startsWith('connect')), hasLength(attempts));
+    expect(container.read(currentDeviceProvider), isNull);
+  });
+
+  test('a characteristic keeps its value while nothing shows it', () async {
+    await session().open(deviceId, 'Fixture');
+    final row = container.listen(characteristicProvider(valueKey()), (_, _) {});
+    await container.read(characteristicProvider(valueKey()).notifier).read();
+    row.close();
+    await pumpEventQueue();
+
+    expect(container.read(characteristicProvider(valueKey())).latest, [0x68, 0x69]);
+  });
+
+  test('a slow Disconnect stops the retries before the link is down', () async {
+    await openAndSubscribe();
+    ble.connectFailures = 1000;
+    ble.dropLink(deviceId);
+    await pumpEventQueue();
+    final attempts = ble.calls.where((c) => c.startsWith('connect')).length;
+
+    // Longer than the first backoff, so only Disconnect itself can stop the loop.
+    ble.disconnectDelay = const Duration(milliseconds: 1500);
+    await session().disconnect();
+    await pumpEventQueue();
+
+    expect(ble.calls.where((c) => c.startsWith('connect')), hasLength(attempts));
+    expect(log, isNot(contains('Reconnecting, attempt 2')));
+  });
+
+  test('a reconnect that lands during Disconnect is dropped', () async {
+    await openAndSubscribe();
+    final statuses = <ConnectionStatus>[];
+    container.listen(connectionProvider.select((c) => c.status), (_, s) => statuses.add(s));
+    final held = ble.holdConnect = Completer<void>();
+    ble.dropLink(deviceId);
+    await pumpEventQueue();
+
+    ble.disconnectDelay = const Duration(milliseconds: 300);
+    final disconnecting = session().disconnect();
+    await pumpEventQueue();
+    held.complete();
+    await disconnecting;
+    await pumpEventQueue();
+
+    expect(statuses.skipWhile((s) => s is! Disconnecting).whereType<Connected>(), isEmpty);
+    expect(log.where((l) => l.startsWith('Reconnected')), isEmpty);
   });
 }

@@ -8,11 +8,12 @@ import '../../helpers/fake_ble.dart';
 void main() {
   late FakeBle ble;
   late ProviderContainer container;
+  late ProviderSubscription<NearbyState> screen;
 
   setUp(() {
     ble = FakeBle();
     container = ProviderContainer.test(overrides: ble.overrides);
-    container.listen(nearbyProvider, (_, _) {});
+    screen = container.listen(nearbyProvider, (_, _) {});
   });
 
   test('scans for fixtures and lists results by signal strength', () async {
@@ -38,5 +39,12 @@ void main() {
     await container.read(nearbyProvider.notifier).setScanning(false);
     expect(ble.calls.last, 'stopScan');
     expect(container.read(nearbyProvider).scanning, isFalse);
+  });
+
+  test('leaving the screen stops a running scan', () async {
+    await container.read(nearbyProvider.notifier).setScanning(true);
+    screen.close();
+    await pumpEventQueue();
+    expect(ble.calls.last, 'stopScan');
   });
 }
