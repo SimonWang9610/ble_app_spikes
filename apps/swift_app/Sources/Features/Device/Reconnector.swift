@@ -6,10 +6,12 @@ final class Reconnector {
     private static let limit: Double = 60
 
     private unowned let session: DeviceSession
+    private let log: Log
     private var task: Task<Void, Never>?
 
-    init(session: DeviceSession) {
+    init(session: DeviceSession, log: Log) {
         self.session = session
+        self.log = log
     }
 
     func start() {
@@ -36,7 +38,7 @@ final class Reconnector {
                 let delay = Self.delays[min(attempt - 1, Self.delays.count - 1)]
                 if (ContinuousClock.now - start).seconds + delay > Self.limit {
                     session.gaveUp(reason: "gave up reconnecting after \(Int(Self.limit)) s")
-                    Log.error("Gave up reconnecting")
+                    log.error("Gave up reconnecting")
                     return
                 }
                 try await Task.sleep(for: .seconds(delay))
@@ -48,14 +50,14 @@ final class Reconnector {
     /// Rethrows the `CancellationError` of an attempt that Disconnect overtook.
     private func attempt(_ attempt: Int) async throws -> Bool {
         session.reconnecting(attempt)
-        Log.event("Reconnecting, attempt \(attempt)")
+        log.event("Reconnecting, attempt \(attempt)")
         do {
             try await session.establish()
             return true
         } catch let error as CancellationError {
             throw error
         } catch {
-            Log.error("Reconnect attempt \(attempt) failed: \(describe(error))")
+            log.error("Reconnect attempt \(attempt) failed: \(describe(error))")
         }
         await session.dropAttempt()
         return false

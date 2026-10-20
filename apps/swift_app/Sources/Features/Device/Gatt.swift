@@ -17,19 +17,21 @@ final class Gatt {
 
     private let remoteId: String
     private let link: any DeviceLink
+    private let log: Log
     private let make: (CharacteristicRef, CharacteristicProperties) -> Characteristic
     @ObservationIgnored private var characteristics: [CharacteristicRef: Characteristic] = [:]
 
     /// `make` builds a characteristic model the first time discovery finds it.
-    init(remoteId: String, link: any DeviceLink,
+    init(remoteId: String, link: any DeviceLink, log: Log,
          make: @escaping (CharacteristicRef, CharacteristicProperties) -> Characteristic) {
         self.remoteId = remoteId
         self.link = link
+        self.log = log
         self.make = make
     }
 
     func discover() async throws -> [BluetoothService] {
-        try await Log.api("discoverServices()") { try await link.discoverServices(remoteId) }
+        try await log.api("discoverServices()") { try await link.discoverServices(remoteId) }
     }
 
     /// Shows the fixture services. Fails if a subscribed characteristic is gone, so a reconnect
@@ -48,7 +50,7 @@ final class Gatt {
         }
         let count = found.reduce(0) { $0 + $1.characteristics.count }
         let hidden = all.count - found.count
-        Log.event("Found \(found.count) services, \(count) characteristics"
+        log.event("Found \(found.count) services, \(count) characteristics"
                   + (hidden == 0 ? "" : " (\(hidden) non-fixture services hidden)"))
     }
 

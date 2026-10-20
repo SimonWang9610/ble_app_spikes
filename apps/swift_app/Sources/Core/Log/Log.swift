@@ -12,29 +12,23 @@ struct LogEntry: Identifiable {
 
 /// What happened to the device, in plain words ("Link lost", "NOTIFY received 42").
 /// Raw binding calls are kept too, but only shown when "API calls" is switched on.
+/// One per app, owned by `BlePocApp` and handed to every model.
 @MainActor
 @Observable
 final class Log {
-    static let shared = Log()
     private static let limit = 500
 
     private(set) var entries: [LogEntry] = []
     var showApiCalls = false
     @ObservationIgnored private var nextId = 0
 
-    private init() {}
-
     var visible: [LogEntry] {
         showApiCalls ? entries : entries.filter { $0.kind != .api }
     }
 
-    static func event(_ text: String) { shared.add(.event, text) }
-    static func value(_ text: String) { shared.add(.value, text) }
-    static func error(_ text: String) { shared.add(.error, text) }
-
-    static func api<T>(_ call: String, _ body: () async throws -> T) async throws -> T {
-        try await shared.api(call, body)
-    }
+    func event(_ text: String) { add(.event, text) }
+    func value(_ text: String) { add(.value, text) }
+    func error(_ text: String) { add(.error, text) }
 
     /// Runs one binding call and logs it as an API line.
     func api<T>(_ call: String, _ body: () async throws -> T) async throws -> T {

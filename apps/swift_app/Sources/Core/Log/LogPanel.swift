@@ -2,11 +2,12 @@ import SwiftUI
 
 /// Always-visible device log under every screen; collapsed to the latest line.
 struct LogPanel: View {
-    @Bindable private var log = Log.shared
+    @Environment(Log.self) private var log
     // Pure view state, nobody else needs it, so it stays in the view.
     @State private var expanded = false
 
     var body: some View {
+        @Bindable var log = log
         let entries = log.visible
 
         VStack(spacing: 0) {

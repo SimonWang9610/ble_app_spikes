@@ -10,31 +10,33 @@ final class DeviceSession {
     let connection: Connection
     let gatt: Gatt
     let subscriptions: Subscriptions
+    private let log: Log
 
-    @ObservationIgnored private lazy var reconnector = Reconnector(session: self)
+    @ObservationIgnored private lazy var reconnector = Reconnector(session: self, log: log)
 
     /// `ble` is only handed on: the link to Connection and Gatt, characteristic IO to the rest.
-    init(remoteId: String, name: String, ble: any DeviceLink & GattIO) {
+    init(remoteId: String, name: String, ble: any DeviceLink & GattIO, log: Log) {
         self.remoteId = remoteId
         self.name = name.isEmpty ? remoteId : name
-        connection = Connection(remoteId: remoteId, link: ble)
-        gatt = Gatt(remoteId: remoteId, link: ble) { ref, properties in
-            Characteristic(ref: ref, properties: properties, io: ble)
+        self.log = log
+        connection = Connection(remoteId: remoteId, link: ble, log: log)
+        gatt = Gatt(remoteId: remoteId, link: ble, log: log) { ref, properties in
+            Characteristic(ref: ref, properties: properties, io: ble, log: log)
         }
-        subscriptions = Subscriptions(io: ble)
+        subscriptions = Subscriptions(io: ble, log: log)
         connection.onLost = { [weak self] in await self?.linkLost() }
     }
 
     func connect() async {
         connection.update(.connecting)
-        Log.event("Connecting to \(name)")
+        log.event("Connecting to \(name)")
         do {
             try await establish()
-            if settle(.connected) { Log.event("Connected") }
+            if settle(.connected) { log.event("Connected") }
         } catch is CancellationError {
         } catch {
             settle(.disconnected(reason: describe(error)))
-            Log.error("Connect failed: \(describe(error))")
+            log.error("Connect failed: \(describe(error))")
         }
     }
 
@@ -48,12 +50,12 @@ final class DeviceSession {
         do {
             try await connection.disconnect()
         } catch {
-            Log.error("Disconnect failed: \(describe(error))")
+            log.error("Disconnect failed: \(describe(error))")
         }
         await connection.close()
         gatt.clear()
         connection.update(.disconnected(reason: nil))
-        Log.event("Disconnected")
+        log.event("Disconnected")
     }
 
     /// Connect, discover, then re-apply the user's subscriptions. Fails unless every one is back.
@@ -94,7 +96,7 @@ final class DeviceSession {
     func reconnected(after seconds: Double) {
         guard settle(.connected) else { return }
         let resumed = subscriptions.names
-        Log.event("Reconnected after \(seconds.oneDecimal) s"
+        log.event("Reconnected after \(seconds.oneDecimal) s"
                   + (resumed.isEmpty ? "" : ", resumed \(resumed.joined(separator: ", "))"))
     }
 
@@ -103,7 +105,7 @@ final class DeviceSession {
         do {
             try await connection.disconnect()
         } catch {
-            Log.error("Cleanup disconnect failed: \(describe(error))")
+            log.error("Cleanup disconnect failed: \(describe(error))")
         }
     }
 
