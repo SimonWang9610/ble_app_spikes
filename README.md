@@ -67,17 +67,22 @@ open BlePocSwiftApp.xcodeproj
 Pick your team under Signing & Capabilities, pick the device, Run. `project.yml` is the source of
 truth; run `xcodegen generate` again after changing it or adding files.
 
-| File | Role |
+Tests (Swift Testing, on a simulator, over the in-memory `FakeBle`):
+
+```sh
+xcodebuild -project BlePocSwiftApp.xcodeproj -scheme BlePocSwiftApp \
+  -destination 'platform=iOS Simulator,name=iPhone 18 Pro' test
+```
+
+| Path | Role |
 |---|---|
-| `Ble/Interfaces.swift`, `BleService.swift` | `BleAdapter` / `DeviceLink` / `GattIO`; the actor that implements them, the only code that touches the binding |
-| `Models/AdapterModel.swift`, `NearbyModel.swift` | Bluetooth state; scanning while Nearby is visible |
-| `Models/Session/DeviceSession.swift` | the connected device: orders the parts below on connect, reconnect and disconnect |
-| `Models/Session/Connection.swift`, `Reconnector.swift` | the link and its status; the retry loop after a link loss |
-| `Models/Session/Gatt.swift`, `Characteristic.swift` | discovered services as tiles; one model per characteristic |
-| `Models/Session/Subscriptions.swift`, `Run.swift` | notify / indicate streams; `Run.wrapAsync` stops work left over from a Disconnect |
-| `Models/SessionStore.swift` | holds the current session (outlives the Device screen) |
-| `Models/Log.swift` | `Log` singleton: device events in plain words; API calls behind a switch |
-| `Views/` | `NearbyView`, `DeviceView`, `CharacteristicSheet` (one operation), `LogPanel` |
+| `Sources/App/` | `BlePocApp` owns the `Log` and the app-wide models and puts them in the environment; `RootView`: navigation stack above the log panel |
+| `Sources/Core/Ble/` | `BleAdapter` / `DeviceLink` / `GattIO`; `BleService`, the actor that implements them and the only code that touches the binding; `AdapterModel` (Bluetooth state); `FakeBle` (debug only, for previews and tests) |
+| `Sources/Core/Log/` | `Log`: device events in plain words, API calls behind a switch; `LogPanel` |
+| `Sources/Core/Support/` | bytes and time formatting, fixture UUID labels, preview models |
+| `Sources/Features/Nearby/` | `NearbyModel` scans while Nearby is visible; `NearbyView` |
+| `Sources/Features/Device/` | `SessionStore` holds the current `DeviceSession`, which orders `Connection`, `Gatt`, `Characteristic`, `Subscriptions` and `Reconnector`; `DeviceView`, `CharacteristicSheet` (one operation) |
+| `Tests/` | bytes, fixture, scanning, connect / subscribe / reconnect / disconnect |
 
 Creating the project in the Xcode GUI instead: File → New → Project → iOS App (SwiftUI); File → Add
 Package Dependencies → Add Local… → `dist/swift/BlePocSwift`; General → Frameworks → add

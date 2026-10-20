@@ -18,7 +18,7 @@ struct NearbyView: View {
 
             if let session = sessions.current {
                 Section("Connected") {
-                    Button { path = [session.remoteId] } label: {
+                    NavigationLink(value: session.remoteId) {
                         DeviceRow(name: session.name, detail: session.connection.status.text, rssi: nil)
                     }
                 }
@@ -27,11 +27,13 @@ struct NearbyView: View {
             Section {
                 Toggle("Only HM-BLE fixtures", isOn: $nearby.onlyFixtures)
                 ForEach(nearby.results, id: \.remoteId) { result in
+                    // A Button, not a NavigationLink: the tap also connects.
                     Button {
-                        _ = sessions.open(remoteId: result.remoteId, name: result.advertisementData.advName)
+                        sessions.open(remoteId: result.remoteId, name: result.advertisementData.advName)
                         path = [result.remoteId]
                     } label: {
-                        DeviceRow(name: result.advertisementData.advName, detail: result.remoteId, rssi: result.rssi)
+                        DeviceRow(name: result.advertisementData.advName, detail: result.remoteId, rssi: result.rssi,
+                                  chevron: true)
                     }
                 }
                 if let error = nearby.error {
@@ -68,10 +70,12 @@ private struct ScanKey: Equatable {
     let onlyFixtures: Bool
 }
 
-struct DeviceRow: View {
+private struct DeviceRow: View {
     let name: String
     let detail: String
     let rssi: Int32?
+    /// Drawn by hand for Button rows; a NavigationLink brings its own.
+    var chevron = false
 
     var body: some View {
         HStack {
@@ -83,7 +87,19 @@ struct DeviceRow: View {
             if let rssi {
                 Text("\(rssi) dBm").font(.callout).foregroundStyle(.secondary)
             }
-            Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
+            if chevron {
+                Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
+                    .accessibilityHidden(true)
+            }
         }
     }
 }
+
+#if DEBUG
+#Preview {
+    let models = PreviewModels()
+    NavigationStack { NearbyView(path: .constant([])) }
+        .environment(models)
+        .task { await models.adapter.observe() }
+}
+#endif

@@ -2,12 +2,14 @@
 @MainActor
 final class Subscriptions {
     private let io: any GattIO
+    private let log: Log
     // What the user subscribed to; kept across a reconnect and resumed after it.
     private var wanted: [CharacteristicRef: Characteristic] = [:]
     private var streams: [CharacteristicRef: Task<Void, Never>] = [:]
 
-    init(io: any GattIO) {
+    init(io: any GattIO, log: Log) {
         self.io = io
+        self.log = log
     }
 
     /// "NOTIFY, INDICATE"
@@ -20,13 +22,13 @@ final class Subscriptions {
                 try await enable(characteristic)
                 wanted[characteristic.ref] = characteristic
                 characteristic.markSubscribed(true)
-                Log.event("\(name) subscribed")
+                log.event("\(name) subscribed")
             } else {
                 stop(characteristic)
                 wanted[characteristic.ref] = nil
                 characteristic.markSubscribed(false)
-                _ = try await Log.api("setNotifyValue(false) \(name)") { try await io.setNotify(characteristic.ref, false) }
-                Log.event("\(name) unsubscribed")
+                _ = try await log.api("setNotifyValue(false) \(name)") { try await io.setNotify(characteristic.ref, false) }
+                log.event("\(name) unsubscribed")
             }
         }
     }
@@ -48,11 +50,11 @@ final class Subscriptions {
     func unsubscribeAll() async {
         for characteristic in wanted.values.sorted(by: { $0.name < $1.name }) {
             do {
-                _ = try await Log.api("setNotifyValue(false) \(characteristic.name)") {
+                _ = try await log.api("setNotifyValue(false) \(characteristic.name)") {
                     try await io.setNotify(characteristic.ref, false)
                 }
             } catch {
-                Log.error("\(characteristic.name): unsubscribe failed: \(describe(error))")
+                log.error("\(characteristic.name): unsubscribe failed: \(describe(error))")
             }
         }
     }
@@ -72,10 +74,10 @@ final class Subscriptions {
             streams[characteristic.ref] = Task {
                 for await value in values {
                     characteristic.record(value, .received)
-                    Log.value("\(characteristic.name) received \(characteristic.show(value))")
+                    log.value("\(characteristic.name) received \(characteristic.show(value))")
                 }
             }
-            _ = try await Log.api("setNotifyValue(true) \(characteristic.name)") {
+            _ = try await log.api("setNotifyValue(true) \(characteristic.name)") {
                 try await io.setNotify(characteristic.ref, true)
             }
         } catch {

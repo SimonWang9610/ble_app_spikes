@@ -25,3 +25,9 @@ struct RootView: View {
         .task { await adapter.observe() }
     }
 }
+
+#if DEBUG
+#Preview {
+    RootView().environment(PreviewModels())
+}
+#endif

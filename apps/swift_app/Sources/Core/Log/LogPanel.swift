@@ -2,11 +2,12 @@ import SwiftUI
 
 /// Always-visible device log under every screen; collapsed to the latest line.
 struct LogPanel: View {
-    @Bindable private var log = Log.shared
+    @Environment(Log.self) private var log
     // Pure view state, nobody else needs it, so it stays in the view.
     @State private var expanded = false
 
     var body: some View {
+        @Bindable var log = log
         let entries = log.visible
 
         VStack(spacing: 0) {
@@ -23,11 +24,17 @@ struct LogPanel: View {
                 } else {
                     Spacer()
                 }
-                Image(systemName: expanded ? "chevron.down" : "chevron.up").font(.caption)
+                Button(expanded ? "Hide log" : "Show log", systemImage: expanded ? "chevron.down" : "chevron.up") {
+                    expanded.toggle()
+                }
+                .labelStyle(.iconOnly)
+                .font(.caption)
+                .buttonStyle(.plain)
             }
             .padding(.horizontal)
             .padding(.vertical, 8)
-            .contentShape(Rectangle())
+            // The whole bar toggles too; the chevron is the accessible control.
+            .contentShape(.rect)
             .onTapGesture { expanded.toggle() }
 
             if expanded {
@@ -71,3 +78,18 @@ private struct LogLine: View {
         }
     }
 }
+
+#if DEBUG
+#Preview {
+    let log = Log()
+    log.event("Connecting to HM-BLE-FIXTURE")
+    log.event("Connected")
+    log.value("NOTIFY received 2a 00 00 00 = 42")
+    log.error("Link lost after 12.3 s")
+    return VStack {
+        Spacer()
+        LogPanel()
+    }
+    .environment(log)
+}
+#endif

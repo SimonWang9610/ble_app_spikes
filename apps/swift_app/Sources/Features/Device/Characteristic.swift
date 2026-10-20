@@ -21,11 +21,13 @@ final class Characteristic: Identifiable {
     private(set) var error: String?
 
     private let io: any GattIO
+    private let log: Log
 
-    init(ref: CharacteristicRef, properties: CharacteristicProperties, io: any GattIO) {
+    init(ref: CharacteristicRef, properties: CharacteristicProperties, io: any GattIO, log: Log) {
         self.ref = ref
         self.properties = properties
         self.io = io
+        self.log = log
     }
 
     nonisolated var id: CharacteristicRef { ref }
@@ -39,20 +41,20 @@ final class Characteristic: Identifiable {
 
     func read() async {
         try? await perform(busy: "Reading…") {
-            let value = try await Log.api("read \(name)") { try await io.read(ref) }
+            let value = try await log.api("read \(name)") { try await io.read(ref) }
             record(value, .read)
-            Log.value("\(name) read \(show(value))")
+            log.value("\(name) read \(show(value))")
         }
     }
 
     /// Throws, so the dialog can show how its own write went.
     func write(_ value: Data, withoutResponse: Bool) async throws {
         try await perform(busy: "Writing…") {
-            try await Log.api("write \(name) withoutResponse: \(withoutResponse)") {
+            try await log.api("write \(name) withoutResponse: \(withoutResponse)") {
                 try await io.write(ref, value, withoutResponse: withoutResponse)
             }
             record(value, .written)
-            Log.value("\(name) wrote \(show(value))")
+            log.value("\(name) wrote \(show(value))")
         }
     }
 
@@ -65,7 +67,7 @@ final class Characteristic: Identifiable {
             try await body()
         } catch {
             self.error = describe(error)
-            Log.error("\(name): \(describe(error))")
+            log.error("\(name): \(describe(error))")
             throw error
         }
     }

@@ -55,7 +55,7 @@ struct CharacteristicSheet: View {
         Section("Latest") {
             if let value = characteristic.latest, let time = characteristic.latestTime, let source = characteristic.latestSource {
                 Text(characteristic.show(value)).font(.body.monospaced()).textSelection(.enabled)
-                Text("\(source.rawValue) at \(time.formatted(date: .omitted, time: .standard))")
+                Text("\(source.rawValue) at \(time, format: Date.FormatStyle(date: .omitted, time: .standard))")
                     .font(.caption).foregroundStyle(.secondary)
             } else {
                 Text("No value yet").foregroundStyle(.secondary)
@@ -92,7 +92,7 @@ struct CharacteristicSheet: View {
             if let value = characteristic.latest, characteristic.latestSource == .received, let time = characteristic.latestTime {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(characteristic.show(value)).font(.body.monospaced()).textSelection(.enabled)
-                    Text("received at \(time.formatted(date: .omitted, time: .standard))")
+                    Text("received at \(time, format: Date.FormatStyle(date: .omitted, time: .standard))")
                         .font(.caption).foregroundStyle(.secondary)
                 }
             } else {
@@ -129,3 +129,15 @@ private struct WriteResult {
     let text: String
     let failed: Bool
 }
+
+#if DEBUG
+#Preview("Write") {
+    let models = PreviewModels()
+    let characteristic = Characteristic(
+        ref: FakeBle.value,
+        properties: .init(read: true, write: true, writeWithoutResponse: true, notify: false, indicate: false),
+        io: models.ble, log: models.log)
+    CharacteristicSheet(characteristic: characteristic, operation: .write, session: models.session())
+        .environment(models)
+}
+#endif

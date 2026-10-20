@@ -14,11 +14,13 @@ struct DeviceView: View {
         List {
             Section {
                 HStack {
-                    Circle().fill(statusColor).frame(width: 10, height: 10)
+                    Circle().fill(connection.status.tint).frame(width: 10, height: 10)
+                        .accessibilityHidden(true)
                     Text(connection.status.text)
                     Spacer()
                     statusButton
                 }
+                .buttonStyle(.borderless)
                 Toggle("Auto-reconnect", isOn: $connection.autoReconnect)
                 HStack {
                     Text("RSSI \(connection.rssi.map { "\($0) dBm" } ?? "–") · MTU \(connection.mtu.map(String.init) ?? "–")")
@@ -28,6 +30,7 @@ struct DeviceView: View {
                         .disabled(!connection.isConnected)
                 }
                 .font(.callout)
+                .buttonStyle(.borderless)
             }
 
             ForEach(session.gatt.services) { group in
@@ -61,9 +64,11 @@ struct DeviceView: View {
             ProgressView()
         }
     }
+}
 
-    private var statusColor: Color {
-        switch session.connection.status {
+private extension ConnectionStatus {
+    var tint: Color {
+        switch self {
         case .connected: .green
         case .connecting, .reconnecting, .disconnecting: .orange
         case .disconnected: .red
@@ -107,14 +112,26 @@ private struct CharacteristicRow: View {
                 if characteristic.subscribed {
                     Label("\(characteristic.receivedCount)", systemImage: "dot.radiowaves.left.and.right")
                         .font(.caption).foregroundStyle(.green)
+                        .accessibilityLabel("Subscribed, \(characteristic.receivedCount) received")
                 } else {
                     Image(systemName: "antenna.radiowaves.left.and.right.slash").foregroundStyle(.secondary)
+                        .accessibilityLabel("Not subscribed")
                 }
             }
             if characteristic.error != nil {
                 Image(systemName: "exclamationmark.circle").foregroundStyle(.red)
+                    .accessibilityLabel("Error")
             }
             Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
+                .accessibilityHidden(true)
         }
     }
 }
+
+#if DEBUG
+#Preview {
+    let models = PreviewModels()
+    NavigationStack { DeviceView(session: models.session()) }
+        .environment(models)
+}
+#endif

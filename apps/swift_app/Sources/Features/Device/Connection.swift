@@ -32,12 +32,14 @@ final class Connection {
 
     private let remoteId: String
     private let link: any DeviceLink
+    private let log: Log
     @ObservationIgnored private var watcher: Task<Void, Never>?
     @ObservationIgnored private var connectedAt: ContinuousClock.Instant?
 
-    init(remoteId: String, link: any DeviceLink) {
+    init(remoteId: String, link: any DeviceLink, log: Log) {
         self.remoteId = remoteId
         self.link = link
+        self.log = log
     }
 
     var isConnected: Bool { status == .connected }
@@ -49,7 +51,7 @@ final class Connection {
     }
 
     func connect() async throws {
-        try await Log.api("connect(timeout: 10)") { try await link.connect(remoteId, timeout: 10) }
+        try await log.api("connect(timeout: 10)") { try await link.connect(remoteId, timeout: 10) }
     }
 
     func readMtu() async {
@@ -58,7 +60,7 @@ final class Connection {
 
     /// Drops the link only; the handle and watcher stay until `close()`.
     func disconnect() async throws {
-        try await Log.api("disconnect()") { try await link.disconnect(remoteId) }
+        try await log.api("disconnect()") { try await link.disconnect(remoteId) }
     }
 
     /// Stops watching and forgets the device handle, so the next session starts fresh.
@@ -70,9 +72,9 @@ final class Connection {
 
     func refreshRssi() async {
         do {
-            rssi = try await Log.api("readRssi()") { try await link.readRssi(remoteId) }
+            rssi = try await log.api("readRssi()") { try await link.readRssi(remoteId) }
         } catch {
-            Log.error("RSSI failed: \(describe(error))")
+            log.error("RSSI failed: \(describe(error))")
         }
     }
 
@@ -88,7 +90,7 @@ final class Connection {
                     if status == .connected { await linkLost() }
                 }
             } catch {
-                Log.error("Connection state unavailable: \(describe(error))")
+                log.error("Connection state unavailable: \(describe(error))")
             }
         }
     }
@@ -96,7 +98,7 @@ final class Connection {
     private func linkLost() async {
         let up = connectedAt.map { (ContinuousClock.now - $0).seconds } ?? 0
         connectedAt = nil
-        Log.event("Link lost after \(up.oneDecimal) s")
+        log.event("Link lost after \(up.oneDecimal) s")
         await onLost?()
     }
 }

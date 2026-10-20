@@ -7,12 +7,15 @@ final class SessionStore {
     private(set) var current: DeviceSession?
 
     private let ble: any DeviceLink & GattIO
+    private let log: Log
 
-    init(ble: any DeviceLink & GattIO) {
+    init(ble: any DeviceLink & GattIO, log: Log) {
         self.ble = ble
+        self.log = log
     }
 
     /// Returns the session for this device, connecting a new one if needed.
+    @discardableResult
     func open(remoteId: String, name: String) -> DeviceSession {
         if let current, current.remoteId == remoteId {
             if case .disconnected = current.connection.status { Task { await current.connect() } }
@@ -21,7 +24,7 @@ final class SessionStore {
         if let old = current {
             Task { await old.disconnect() }
         }
-        let session = DeviceSession(remoteId: remoteId, name: name, ble: ble)
+        let session = DeviceSession(remoteId: remoteId, name: name, ble: ble, log: log)
         current = session
         Task { await session.connect() }
         return session

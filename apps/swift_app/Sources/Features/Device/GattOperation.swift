@@ -17,11 +17,11 @@ enum GattOperation: CaseIterable {
 
     var color: Color {
         switch self {
-        case .read: Color(hex: 0x007AFF)
-        case .write: Color(hex: 0xAF52DE)
-        case .writeWithoutResponse: Color(hex: 0x5856D6)
-        case .notify: Color(hex: 0x34C759)
-        case .indicate: Color(hex: 0x30B0C7)
+        case .read: .blue
+        case .write: .purple
+        case .writeWithoutResponse: .indigo
+        case .notify: .green
+        case .indicate: .teal
         }
     }
 
@@ -75,14 +75,5 @@ struct OperationChip: View {
             .padding(.horizontal, 7)
             .padding(.vertical, 2)
             .background(operation.color.opacity(0.15), in: Capsule())
-    }
-}
-
-private extension Color {
-    init(hex: UInt32) {
-        self.init(
-            red: Double((hex >> 16) & 0xFF) / 255,
-            green: Double((hex >> 8) & 0xFF) / 255,
-            blue: Double(hex & 0xFF) / 255)
     }
 }
