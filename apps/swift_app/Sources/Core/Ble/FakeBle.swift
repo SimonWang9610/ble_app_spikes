@@ -36,6 +36,9 @@ actor FakeBle: BleAdapter, DeviceLink, GattIO {
 
     func setFailConnect(_ fail: Bool) { failConnect = fail }
 
+    /// What the next discovery finds.
+    func setServices(_ services: [BluetoothService]) { self.services = services }
+
     /// The link drops as if the device went away.
     func dropLink(_ remoteId: String) {
         connected.remove(remoteId)
@@ -120,6 +123,7 @@ actor FakeBle: BleAdapter, DeviceLink, GattIO {
     }
 
     func setNotify(_ ref: CharacteristicRef, _ enable: Bool) throws -> Bool {
+        calls.append("setNotify(\(enable))")
         guard connected.contains(ref.remoteId) else { throw FakeError.notConnected }
         if enable { notifying.insert(ref) } else { notifying.remove(ref) }
         return enable
