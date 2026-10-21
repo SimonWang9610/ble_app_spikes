@@ -21,12 +21,14 @@ final class SessionStore {
             if case .disconnected = current.connection.status { Task { await current.connect() } }
             return current
         }
-        if let old = current {
-            Task { await old.disconnect() }
-        }
+        let old = current
         let session = DeviceSession(remoteId: remoteId, name: name, ble: ble, log: log)
         current = session
-        Task { await session.connect() }
+        // The old device finishes disconnecting before the new one connects, so the two never overlap.
+        Task {
+            await old?.disconnect()
+            await session.connect()
+        }
         return session
     }
 
